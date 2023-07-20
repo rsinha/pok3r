@@ -1,0 +1,45 @@
+[package]
+name = "pok3r"
+version = "0.0.1"
+repository = "https://github.com/rsinha/pok3r"
+keywords = ["cryptography", "finite-fields", "elliptic-curves", "pairing"]
+categories = ["cryptography"]
+include = ["Cargo.toml", "src", "README.md", "LICENSE-APACHE", "LICENSE-MIT"]
+license = "MIT/Apache-2.0"
+edition = "2021"
+rust-version = "1.63"
+
+################################# Dependencies ################################
+
+[dependencies]
+sha2 = "0.9"
+criterion = { version = "0.4.0", features = [ "html_reports" ] }
+ark-std = { version = "0.4.0" }
+ark-ec = { version = "0.4.0" }
+ark-ff = { version = "0.4.0" }
+ark-poly = { version = "0.4.0" }
+ark-bn254 = { version = "0.4.0" }
+ark-bls12-377 = { version = "0.4.0", default-features = false, features = [ "curve", "r1cs" ] }
+ark-serialize = { version = "^0.4.0", default-features = true }
+ark-crypto-primitives = { version = "^0.4.0", default-features = false, features = [ "r1cs", "crh", "merkle_tree" ] }
+ark-r1cs-std = { version = "0.4.0" }
+ark-ed-on-bls12-377 = { version = "0.4.0", default-features = false, features = [ "r1cs" ] }
+ark-ed-on-bw6-761 = { version = "0.4.0", default-features = false, features = [ "r1cs" ] }
+ark-bw6-761 = { version = "0.4.0" }
+ark-relations = { version = "0.4.0" }
+ark-snark = { version = "0.4.0" }
+ark-groth16 = { version = "0.4.0" }
+num-bigint = { version = "0.4.0", default-features = false }
+rand = "*"
+paste = { version = "1.0" }
+crossbeam = { version = "0.8.2" }
+tracing = { version = "0.1", default-features = false, features = [ "attributes" ] }
+tracing-subscriber = { version = "0.2" }
+
+[features]
+asm = [ "ark-ff/asm" ]
+parallel = [ "ark-std/parallel", "ark-ff/parallel",  "ark-ec/parallel", ]
+
+[profile.dev]
+opt-level = 3
+
