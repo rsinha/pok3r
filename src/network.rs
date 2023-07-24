@@ -13,7 +13,7 @@ use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 use crate::address_book::*;
-
+use crate::common::*;
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
 #[derive(NetworkBehaviour)]
@@ -33,7 +33,7 @@ pub async fn run_networking_daemon(
     secret_key_seed: u8,
     addr_book: &Pok3rAddrBook,
     tx: &mut mpsc::UnboundedSender<String>, 
-    rx: &mut mpsc::UnboundedReceiver<String>) -> Result<(), Box<dyn Error>> {
+    mut rx: mpsc::UnboundedReceiver<String>) -> Result<(), Box<dyn Error>> {
     // Create a random PeerId
     //let id_keys = identity::Keypair::generate_ed25519();
     let id_keys: identity::Keypair = generate_ed25519(secret_key_seed);
@@ -115,7 +115,6 @@ pub async fn run_networking_daemon(
                     for (peer_id, _multiaddr) in list {
                         println!("mDNS discovered a new peer: {peer_id}");
                         let peer_id_encoded = peer_id.to_base58();
-                        println!("base58 encoding: {}", peer_id_encoded);
                         swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         
                         if addr_book.contains_key(&peer_id_encoded) { 
@@ -123,10 +122,10 @@ pub async fn run_networking_daemon(
 
                             if !connection_informed && 
                                 (connected_peers.len() == addr_book.len() - 1) {
-                                let r = tx.send("connected".to_string()).await;
-                                if let Err(err) = r {
-                                    eprint!("network error {:?}", err);
-                                }
+                                let _r = tx.send("connected".to_string()).await;
+                                // if let Err(err) = r {
+                                //     eprint!("network error {:?}", err);
+                                // }
                                 connection_informed = true;
                             }
                         }

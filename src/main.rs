@@ -8,8 +8,10 @@ use serde_json::json;
 mod network;
 mod evaluator;
 mod address_book;
+mod common;
 
 use address_book::*;
+use evaluator::*;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -59,8 +61,8 @@ async fn main() {
     let args = Args::parse();
 
     //these channels will connect the evaluator and the network daemons
-    let (mut n2e_tx, mut n2e_rx) = mpsc::unbounded::<String>();
-    let (mut e2n_tx, mut e2n_rx) = mpsc::unbounded::<String>();
+    let (mut n2e_tx, n2e_rx) = mpsc::unbounded::<String>();
+    let (e2n_tx, e2n_rx) = mpsc::unbounded::<String>();
 
     let netd_handle = thread::spawn(move || {
         let result = task::block_on(
@@ -68,26 +70,34 @@ async fn main() {
                 args.seed, 
                 &parse_addr_book_from_json(), 
                 &mut n2e_tx,
-                &mut e2n_rx)
+                e2n_rx)
         );
         if let Err(err) = result {
             eprint!("Networking error {:?}", err);
         }
     });
     
-    let eval_handle = thread::spawn(move || {
-        let result = task::block_on(
-            evaluator::run_evaluator_daemon(
-                &args.id, 
-                &&parse_addr_book_from_json(), 
-                &mut e2n_tx, 
-                &mut n2e_rx)
-        );
-        if let Err(err) = result {
-            eprint!("Evaluator error {:?}", err);
-        }
-    });
+    let addr_book = parse_addr_book_from_json();
+    let mut evaluator = Evaluator::new(&args.id, &addr_book, e2n_tx, n2e_rx).await;
+    evaluator.test_networking().await;
 
-    eval_handle.join().unwrap();
+    // let eval_handle = thread::spawn(move || {
+    //     let result = task::block_on(
+    //         {
+    //             // evaluator::run_evaluator_daemon(
+    //             //     &args.id, 
+    //             //     &&parse_addr_book_from_json(), 
+    //             //     &mut e2n_tx, 
+    //             //     n2e_rx)
+    //             let mut evaluator = Evaluator::new(&args.id, &parse_addr_book_from_json(), e2n_tx, n2e_rx);
+    //             evaluator.establish_channel()
+    //         }
+    //     );
+    //     if let Err(err) = result {
+    //         eprint!("Evaluator error {:?}", err);
+    //     }
+    // });
+
+    //eval_handle.join().unwrap();
     netd_handle.join().unwrap();
 }
