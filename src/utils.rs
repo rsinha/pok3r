@@ -9,7 +9,7 @@ use ark_poly::{
     Radix2EvaluationDomain,
     Evaluations
 };
-type F = ark_bn254::Fr;
+type F = ark_bls12_377::Fr;
 
 macro_rules! requires_power_of_2 {
     ($x:expr) => {

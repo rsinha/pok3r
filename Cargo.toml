@@ -18,23 +18,27 @@ ark-std = { version = "0.4.0" }
 ark-ec = { version = "0.4.0" }
 ark-ff = { version = "0.4.0" }
 ark-poly = { version = "0.4.0" }
-ark-bn254 = { version = "0.4.0" }
 ark-bls12-377 = { version = "0.4.0", default-features = false, features = [ "curve", "r1cs" ] }
 ark-serialize = { version = "^0.4.0", default-features = true }
 ark-crypto-primitives = { version = "^0.4.0", default-features = false, features = [ "r1cs", "crh", "merkle_tree" ] }
-ark-r1cs-std = { version = "0.4.0" }
-ark-ed-on-bls12-377 = { version = "0.4.0", default-features = false, features = [ "r1cs" ] }
-ark-ed-on-bw6-761 = { version = "0.4.0", default-features = false, features = [ "r1cs" ] }
-ark-bw6-761 = { version = "0.4.0" }
-ark-relations = { version = "0.4.0" }
-ark-snark = { version = "0.4.0" }
-ark-groth16 = { version = "0.4.0" }
 num-bigint = { version = "0.4.0", default-features = false }
+
 rand = "*"
 paste = { version = "1.0" }
 crossbeam = { version = "0.8.2" }
 tracing = { version = "0.1", default-features = false, features = [ "attributes" ] }
 tracing-subscriber = { version = "0.2" }
+
+async-std = { version = "1.12", features = ["attributes"] }
+async-trait = "0.1"
+env_logger = "0.10.0"
+futures = "0.3.28"
+libp2p = { version = "0.52.0", features = ["async-std", "gossipsub", "mdns", "noise", "macros", "tcp", "yamux"] }
+libp2p-quic = { version = "0.8.0-alpha", features = ["async-std"] }
+clap = { version = "4.3.17", default_features = false, features = ["std", "derive"] }
+serde = { version = "1", default_features = false, features = ["derive"] }
+serde_bare = "0.5.0"
+serde_json = { version = "1.0", default_features = false }
 
 [features]
 asm = [ "ark-ff/asm" ]
