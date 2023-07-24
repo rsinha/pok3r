@@ -12,6 +12,7 @@ mod common;
 
 use address_book::*;
 use evaluator::*;
+use common::*;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -61,8 +62,8 @@ async fn main() {
     let args = Args::parse();
 
     //these channels will connect the evaluator and the network daemons
-    let (mut n2e_tx, n2e_rx) = mpsc::unbounded::<String>();
-    let (e2n_tx, e2n_rx) = mpsc::unbounded::<String>();
+    let (mut n2e_tx, n2e_rx) = mpsc::unbounded::<EvalNetMsg>();
+    let (e2n_tx, e2n_rx) = mpsc::unbounded::<EvalNetMsg>();
 
     let netd_handle = thread::spawn(move || {
         let result = task::block_on(
@@ -78,7 +79,7 @@ async fn main() {
     });
     
     let addr_book = parse_addr_book_from_json();
-    let mut evaluator = Evaluator::new(&args.id, &addr_book, e2n_tx, n2e_rx).await;
+    let mut evaluator = Evaluator::new(&args.id, addr_book, e2n_tx, n2e_rx).await;
     evaluator.test_networking().await;
 
     // let eval_handle = thread::spawn(move || {

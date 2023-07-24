@@ -17,19 +17,32 @@ macro_rules! send_over_network {
 
 pub struct Evaluator {
     id: Pok3rPeerId,
-    tx: mpsc::UnboundedSender<String>,
-    rx: mpsc::UnboundedReceiver<String>,
+    addr_book: Pok3rAddrBook,
+    tx: mpsc::UnboundedSender<EvalNetMsg>,
+    rx: mpsc::UnboundedReceiver<EvalNetMsg>,
 }
 
 impl Evaluator {
     pub async fn new(
         id: &Pok3rPeerId,
-        _addr_book: &Pok3rAddrBook,
-        tx: mpsc::UnboundedSender<String>, 
-        mut rx: mpsc::UnboundedReceiver<String>
+        addr_book: Pok3rAddrBook,
+        tx: mpsc::UnboundedSender<EvalNetMsg>, 
+        mut rx: mpsc::UnboundedReceiver<EvalNetMsg>
     ) -> Self {
-        let msg: String = rx.select_next_some().await;
-        println!("evaluator expecting connection, got: {}", msg);
+        // we expect the first message from the 
+        // networkd to be a connection established;
+        // so, here we will loop till we get that
+        loop {
+            //do a blocking recv on the rx channel
+            let msg: EvalNetMsg = rx.select_next_some().await;
+            match msg {
+                EvalNetMsg::ConnectionEstablished(..) => {
+                    println!("evaluator connected to the network");
+                    break;
+                },
+                _ => continue,
+            }
+        }
 
         task::block_on(async {
             task::sleep(Duration::from_secs(1)).await;
@@ -37,7 +50,8 @@ impl Evaluator {
         });
 
         Evaluator { 
-            id: id.clone(), 
+            id: id.clone(),
+            addr_book: addr_book,
             tx: tx, 
             rx: rx
         }
@@ -46,13 +60,19 @@ impl Evaluator {
     pub async fn test_networking(&mut self) {
         let greeting = format!("Hello from {}", self.id);
         //now do the MPC
+        let greeting = EvalNetMsg::Greeting( Greeting { message: greeting } );
         send_over_network!(greeting, self.tx);
         //send_over_network!(String::from("Hellloooo from me"), tx);
-        
-        let msg: String = self.rx.select_next_some().await;
-        println!("evaluator received: {}", msg);
-        let msg: String = self.rx.select_next_some().await;
-        println!("evaluator received: {}", msg);
+
+        //we expect greetings from all other players
+        let num_other_parties = self.addr_book.len() - 1;
+        for _ in 0..num_other_parties {
+            let msg: EvalNetMsg = self.rx.select_next_some().await;
+            match msg {
+                EvalNetMsg::Greeting(m) => { println!("evaluator received: {:?}", m); },
+                _ => continue,
+            }
+        }
     }
 
 }

@@ -32,8 +32,8 @@ fn generate_ed25519(secret_key_seed: u8) -> identity::Keypair {
 pub async fn run_networking_daemon(
     secret_key_seed: u8,
     addr_book: &Pok3rAddrBook,
-    tx: &mut mpsc::UnboundedSender<String>, 
-    mut rx: mpsc::UnboundedReceiver<String>) -> Result<(), Box<dyn Error>> {
+    tx: &mut mpsc::UnboundedSender<EvalNetMsg>, 
+    mut rx: mpsc::UnboundedReceiver<EvalNetMsg>) -> Result<(), Box<dyn Error>> {
     // Create a random PeerId
     //let id_keys = identity::Keypair::generate_ed25519();
     let id_keys: identity::Keypair = generate_ed25519(secret_key_seed);
@@ -102,7 +102,12 @@ pub async fn run_networking_daemon(
         select! {
             //receives requests for publishing messages from the evaluator
             msg_to_send = rx.select_next_some() => {
-                let s = format!("{} from {:?}", msg_to_send, local_peer_id);
+                let s = match msg_to_send {
+                    EvalNetMsg::Greeting(m) => format!("{:?} from {:?}", m, local_peer_id),
+                    EvalNetMsg::PublishShare(m) => serde_json::to_string(&m).unwrap(),
+                    EvalNetMsg::SendShare(m) => serde_json::to_string(&m).unwrap(),
+                    _ => panic!("Unexpected message received by networkd"),
+                };
                 if let Err(e) = swarm
                     .behaviour_mut().gossipsub
                     .publish(topic.clone(), <String as AsRef<[u8]>>::as_ref(&s)) {
@@ -122,7 +127,9 @@ pub async fn run_networking_daemon(
 
                             if !connection_informed && 
                                 (connected_peers.len() == addr_book.len() - 1) {
-                                let _r = tx.send("connected".to_string()).await;
+                                let _r = tx.send(
+                                    EvalNetMsg::ConnectionEstablished(ConnectionEstablished {})
+                                ).await;
                                 // if let Err(err) = r {
                                 //     eprint!("network error {:?}", err);
                                 // }
@@ -145,8 +152,8 @@ pub async fn run_networking_daemon(
                     message,
                 })) => { 
                     let msg_as_str = String::from_utf8_lossy(&message.data);
-                    //println!("Got message: '{}' with id: {id} from peer: {peer_id}", msg_as_str,);
-                    let r = tx.send(msg_as_str.to_string()).await;
+                    let deserialized_struct = serde_json::from_str(&msg_as_str).unwrap();
+                    let r = tx.send(deserialized_struct).await;
                     if let Err(err) = r {
                         eprint!("network error {:?}", err);
                     }
