@@ -37,7 +37,6 @@ libp2p = { version = "0.52.0", features = ["async-std", "gossipsub", "mdns", "no
 libp2p-quic = { version = "0.8.0-alpha", features = ["async-std"] }
 clap = { version = "4.3.17", default_features = false, features = ["std", "derive"] }
 serde = { version = "1", default_features = false, features = ["derive"] }
-#serde_bare = "0.5.0"
 serde_json = { version = "*" }
 
 [features]

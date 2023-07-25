@@ -1,4 +1,4 @@
-use std::{thread, collections::HashMap};
+use std::{thread, collections::HashMap, time::Duration};
 use async_std::task;
 //use std::sync::mpsc;
 use futures::channel::*;
@@ -80,24 +80,14 @@ async fn main() {
     
     let addr_book = parse_addr_book_from_json();
     let mut evaluator = Evaluator::new(&args.id, addr_book, e2n_tx, n2e_rx).await;
-    evaluator.test_networking().await;
 
-    // let eval_handle = thread::spawn(move || {
-    //     let result = task::block_on(
-    //         {
-    //             // evaluator::run_evaluator_daemon(
-    //             //     &args.id, 
-    //             //     &&parse_addr_book_from_json(), 
-    //             //     &mut e2n_tx, 
-    //             //     n2e_rx)
-    //             let mut evaluator = Evaluator::new(&args.id, &parse_addr_book_from_json(), e2n_tx, n2e_rx);
-    //             evaluator.establish_channel()
-    //         }
-    //     );
-    //     if let Err(err) = result {
-    //         eprint!("Evaluator error {:?}", err);
-    //     }
-    // });
+    //this is a hack until we figure out
+    task::block_on(async {
+        task::sleep(Duration::from_secs(1)).await;
+        println!("After sleeping for 1 second.");
+    });
+
+    evaluator.test_networking().await;
 
     //eval_handle.join().unwrap();
     netd_handle.join().unwrap();

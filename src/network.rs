@@ -153,9 +153,7 @@ pub async fn run_networking_daemon(
                     message,
                 })) => { 
                     let msg_as_str = String::from_utf8_lossy(&message.data);
-                    println!("networking: about to serde {}", msg_as_str);
                     let deserialized_struct = serde_json::from_str(&msg_as_str).unwrap();
-                    //println!("networking: parsed as json {:?}", deserialized_struct);
                     let r = tx.send(deserialized_struct).await;
                     if let Err(err) = r {
                         eprint!("network error {:?}", err);

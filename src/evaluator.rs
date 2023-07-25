@@ -1,7 +1,5 @@
 
 use futures::{prelude::*, channel::*};
-use std::time::Duration;
-use async_std::task;
 
 use crate::address_book::*;
 use crate::common::*;
@@ -46,11 +44,6 @@ impl Evaluator {
             }
         }
 
-        task::block_on(async {
-            task::sleep(Duration::from_secs(1)).await;
-            println!("After sleeping for 1 second.");
-        });
-
         Evaluator { 
             id: id.clone(),
             addr_book: addr_book,
@@ -62,15 +55,13 @@ impl Evaluator {
     pub async fn test_networking(&mut self) {
         let greeting = EvalNetMsg::Greeting { message: format!("Hello from {}", self.id) };
         send_over_network!(greeting, self.tx);
-        //send_over_network!(String::from("Hellloooo from me"), tx);
 
         //we expect greetings from all other players
         let num_other_parties = self.addr_book.len() - 1;
         for _ in 0..num_other_parties {
             let msg: EvalNetMsg = self.rx.select_next_some().await;
-            //println!("evaluator got {:?}", msg);
             match msg {
-                EvalNetMsg::Greeting { message } => { println!("evaluator parsed: {:?}", message); },
+                EvalNetMsg::Greeting { message } => { println!("evaluator received: {:?}", message); },
                 _ => continue,
             }
         }
