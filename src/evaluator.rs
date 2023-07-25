@@ -36,9 +36,11 @@ impl Evaluator {
             //do a blocking recv on the rx channel
             let msg: EvalNetMsg = rx.select_next_some().await;
             match msg {
-                EvalNetMsg::ConnectionEstablished(..) => {
-                    println!("evaluator connected to the network");
-                    break;
+                EvalNetMsg::ConnectionEstablished { success } => {
+                    if success {
+                        println!("evaluator connected to the network");
+                        break;
+                    }
                 },
                 _ => continue,
             }
@@ -58,9 +60,7 @@ impl Evaluator {
     }
 
     pub async fn test_networking(&mut self) {
-        let greeting = format!("Hello from {}", self.id);
-        //now do the MPC
-        let greeting = EvalNetMsg::Greeting( Greeting { message: greeting } );
+        let greeting = EvalNetMsg::Greeting { message: format!("Hello from {}", self.id) };
         send_over_network!(greeting, self.tx);
         //send_over_network!(String::from("Hellloooo from me"), tx);
 
@@ -68,8 +68,9 @@ impl Evaluator {
         let num_other_parties = self.addr_book.len() - 1;
         for _ in 0..num_other_parties {
             let msg: EvalNetMsg = self.rx.select_next_some().await;
+            //println!("evaluator got {:?}", msg);
             match msg {
-                EvalNetMsg::Greeting(m) => { println!("evaluator received: {:?}", m); },
+                EvalNetMsg::Greeting { message } => { println!("evaluator parsed: {:?}", message); },
                 _ => continue,
             }
         }

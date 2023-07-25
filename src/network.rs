@@ -102,12 +102,13 @@ pub async fn run_networking_daemon(
         select! {
             //receives requests for publishing messages from the evaluator
             msg_to_send = rx.select_next_some() => {
-                let s = match msg_to_send {
-                    EvalNetMsg::Greeting(m) => format!("{:?} from {:?}", m, local_peer_id),
-                    EvalNetMsg::PublishShare(m) => serde_json::to_string(&m).unwrap(),
-                    EvalNetMsg::SendShare(m) => serde_json::to_string(&m).unwrap(),
-                    _ => panic!("Unexpected message received by networkd"),
-                };
+                // let s = match msg_to_send {
+                //     EvalNetMsg::Greeting(m) => serde_json::to_string(&m).unwrap(),
+                //     EvalNetMsg::PublishShare(m) => serde_json::to_string(&m).unwrap(),
+                //     EvalNetMsg::SendShare(m) => serde_json::to_string(&m).unwrap(),
+                //     _ => panic!("Unexpected message received by networkd"),
+                // };
+                let s = serde_json::to_string(&msg_to_send).unwrap();
                 if let Err(e) = swarm
                     .behaviour_mut().gossipsub
                     .publish(topic.clone(), <String as AsRef<[u8]>>::as_ref(&s)) {
@@ -128,7 +129,7 @@ pub async fn run_networking_daemon(
                             if !connection_informed && 
                                 (connected_peers.len() == addr_book.len() - 1) {
                                 let _r = tx.send(
-                                    EvalNetMsg::ConnectionEstablished(ConnectionEstablished {})
+                                    EvalNetMsg::ConnectionEstablished { success: true }
                                 ).await;
                                 // if let Err(err) = r {
                                 //     eprint!("network error {:?}", err);
@@ -152,7 +153,9 @@ pub async fn run_networking_daemon(
                     message,
                 })) => { 
                     let msg_as_str = String::from_utf8_lossy(&message.data);
+                    println!("networking: about to serde {}", msg_as_str);
                     let deserialized_struct = serde_json::from_str(&msg_as_str).unwrap();
+                    //println!("networking: parsed as json {:?}", deserialized_struct);
                     let r = tx.send(deserialized_struct).await;
                     if let Err(err) = r {
                         eprint!("network error {:?}", err);

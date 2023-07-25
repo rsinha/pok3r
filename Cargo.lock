@@ -2452,7 +2452,6 @@ dependencies = [
  "paste",
  "rand 0.8.5",
  "serde",
- "serde_bare",
  "serde_json",
  "sha2 0.9.9",
  "tracing",
@@ -2933,15 +2932,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30e27d1e4fd7659406c492fd6cfaf2066ba8773de45ca75e855590f856dc34a9"
 dependencies = [
  "serde_derive",
-]
-
-[[package]]
-name = "serde_bare"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51c55386eed0f1ae957b091dc2ca8122f287b60c79c774cbe3d5f2b69fded660"
-dependencies = [
- "serde",
 ]
 
 [[package]]
