@@ -7,6 +7,25 @@ use serde::{Serialize, Deserialize};
 pub enum EvalNetMsg {
     ConnectionEstablished { success: bool },
     Greeting { message: String },
-    PublishShare { sender: String, value: String },
-    SendShare { sender: String, value: String },
+    PublishShare { 
+        sender: String,
+        handle: String,
+        share: String 
+    },
+    SendShare { 
+        sender: String, 
+        receiver: String, 
+        handle: String, 
+        value: String 
+    },
+    SendTriple { 
+        sender: String, 
+        receiver: String, 
+        handle_a: String, 
+        share_a: String,
+        handle_b: String,
+        share_b: String,
+        handle_c: String,
+        share_c: String,
+    },
 }

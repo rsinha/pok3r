@@ -2441,6 +2441,7 @@ dependencies = [
  "ark-std",
  "async-std",
  "async-trait",
+ "bs58",
  "clap 4.3.19",
  "criterion",
  "crossbeam",

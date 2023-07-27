@@ -9,6 +9,8 @@ mod network;
 mod evaluator;
 mod address_book;
 mod common;
+mod utils;
+mod preprocessor;
 
 use address_book::*;
 use evaluator::*;
@@ -88,6 +90,26 @@ async fn main() {
     });
 
     evaluator.test_networking().await;
+
+    println!("-------------- Ready to compute -----------------");
+
+    println!("testing beaver triples...");
+    let (h_a, h_b, h_c) = evaluator.beaver(0).await;
+    let a = evaluator.output_wire(&h_a).await;
+    let b = evaluator.output_wire(&h_b).await;
+    let c = evaluator.output_wire(&h_c).await;
+    assert_eq!(c, a * b);
+
+    println!("testing adder...");
+    let h_r1 = evaluator.ran(1);
+    let h_r2 = evaluator.ran(2);
+    let r1 = evaluator.output_wire(&h_r1).await;
+    let r2 = evaluator.output_wire(&h_r2).await;
+    let h_sum_r1_r2 = evaluator.add(&h_r1, &h_r2);
+    let sum_r1_r2 = evaluator.output_wire(&h_sum_r1_r2).await;
+    assert_eq!(sum_r1_r2, r1 + r2);
+
+    println!("-------------- End compute -----------------");
 
     //eval_handle.join().unwrap();
     netd_handle.join().unwrap();
