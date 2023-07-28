@@ -382,7 +382,7 @@ impl Evaluator {
     fn process_next_message(&mut self, msg: &EvalNetMsg) {
         match msg {
             EvalNetMsg::SendTriple { 
-                sender,
+                sender: _sender,
                 receiver,
                 handle_a,
                 share_a,
