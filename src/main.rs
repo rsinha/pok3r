@@ -113,6 +113,11 @@ async fn main() {
     let mult_r1_r2 = evaluator.output_wire(&h_mult_r1_r2).await;
     assert_eq!(mult_r1_r2, r1 * r2);
 
+    println!("testing inverter...");
+    let h_r1_inverted = evaluator.inv(&h_r1, &h_r2, (&h_a, &h_b, &h_c)).await;
+    let r1_inverted = evaluator.output_wire(&h_r1_inverted).await;
+    assert_eq!(r1_inverted, r1 * r1_inverted);
+
     println!("-------------- End compute -----------------");
 
     //eval_handle.join().unwrap();

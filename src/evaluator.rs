@@ -69,6 +69,18 @@ fn compute_ran_input_wire_id(gate_id: u64) -> String {
     bs58::encode(hash).into_string()
 }
 
+fn compute_inversion_wire_id(x: &String) -> String {
+    let mut hasher_input = Vec::new();
+    hasher_input.extend_from_slice(&(Gate::INV as u64).to_be_bytes());
+    hasher_input.extend_from_slice(x.as_bytes());
+
+    let mut hasher = Sha256::new();
+    hasher.update(&hasher_input);
+    let hash = hasher.finalize();
+
+    bs58::encode(hash).into_string()
+}
+
 fn compute_2_input_gate_output_wire_id(
     gate_type: Gate, x: &String, y: &String) -> String {
     let mut hasher_input = Vec::new();
@@ -168,6 +180,7 @@ impl Evaluator {
         handle
     }
 
+    /// outputs the wire label denoting the [x] + [y]
     pub fn add(&mut self, 
         handle_x: &String, 
         handle_y: &String) -> String {
@@ -180,10 +193,39 @@ impl Evaluator {
         self.wire_shares.insert(handle.clone(), share_x + share_y);
         handle
     }
+    
+    pub async fn inv(&mut self, 
+        handle_in: &String,
+        handle_r: &String,
+        beaver_handles: (&String, &String, &String)
+    ) -> String {
+        // goal: compute inv([s])
+        // step 1: invoke ran_p to obtain [r]
+        // step 2: invoke mult to get [q] = [r . s]
+        // step 3: reconstruct q = r . s
+        // step 4: return [r] / q
+        
+        let handle_out = compute_inversion_wire_id(handle_in);
+        
+        let handle_r_mult_s = self.mult(
+            handle_in, 
+            handle_r, 
+            beaver_handles).await;
+        //reconstruct the padded wires in the clear
+        let r_mult_s = self.output_wire(&handle_r_mult_s).await;
+
+        let q_inv = F::from(1) / r_mult_s;
+        let wire_out = q_inv * self.get_wire(handle_r);
+
+        self.wire_shares.insert(handle_out.clone(), wire_out);
+
+        handle_out
+    }
 
     /// given: triple ([a], [b], [c]) and inputs ([x], [y])
     /// reveals: x + a, y + b
-    /// computes [xy] = (x+a).(y+b) - (x+a).[b] - (y+b).[a] + [c]
+    /// computes [x.y] = (x+a).(y+b) - (x+a).[b] - (y+b).[a] + [c]
+    /// outputs the wire label denoting [x.y]
     pub async fn mult(&mut self, 
         handle_x: &String, 
         handle_y: &String,
