@@ -10,7 +10,6 @@ mod evaluator;
 mod address_book;
 mod common;
 mod utils;
-mod preprocessor;
 
 use address_book::*;
 use evaluator::*;
@@ -108,6 +107,11 @@ async fn main() {
     let h_sum_r1_r2 = evaluator.add(&h_r1, &h_r2);
     let sum_r1_r2 = evaluator.output_wire(&h_sum_r1_r2).await;
     assert_eq!(sum_r1_r2, r1 + r2);
+
+    println!("testing multiplier...");
+    let h_mult_r1_r2 = evaluator.mult(&h_r1, &h_r2, (&h_a, &h_b, &h_c)).await;
+    let mult_r1_r2 = evaluator.output_wire(&h_mult_r1_r2).await;
+    assert_eq!(mult_r1_r2, r1 * r2);
 
     println!("-------------- End compute -----------------");
 

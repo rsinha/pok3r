@@ -26,11 +26,11 @@ pub fn get_node_id_via_peer_id(
     }
 }
 
-pub fn get_peer_id_via_node_id(addr_book: &Pok3rAddrBook, node_id: u64) -> Option<Pok3rPeerId> {
-    for (id, peer) in addr_book.iter() {
-        if peer.node_id == node_id {
-            return Some(id.clone());
-        }
-    }
-    return None;
-}
+// pub fn get_peer_id_via_node_id(addr_book: &Pok3rAddrBook, node_id: u64) -> Option<Pok3rPeerId> {
+//     for (id, peer) in addr_book.iter() {
+//         if peer.node_id == node_id {
+//             return Some(id.clone());
+//         }
+//     }
+//     return None;
+// }

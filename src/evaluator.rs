@@ -1,27 +1,19 @@
-use ark_ff::Field;
-use ark_std::{UniformRand, test_rng, ops::*};
-use ark_serialize::{
-    buffer_byte_size, CanonicalDeserialize, CanonicalDeserializeWithFlags, CanonicalSerialize,
-    CanonicalSerializeWithFlags, Compress, EmptyFlags, Flags, SerializationError, Valid, Validate,
-};
-
+use ark_std::UniformRand;
 use std::collections::HashMap;
-use std::hash::Hash;
 use futures::{prelude::*, channel::*};
 
 use sha2::{Sha256, Digest};
-use bs58::*;
 
 use crate::address_book::*;
 use crate::common::*;
 use crate::utils;
-use crate::preprocessor::*;
 
 pub enum Gate {
-    BEAVER = 1, //denotes a beaver triple source gate that is output by pre-processing
+    BEAVER = 1, // denotes a beaver triple source gate that is output by pre-processing
     RAN = 2, // denotes a random gate that is the output of the pre-processing stage
     ADD = 3, // denotes an adder over 2 input wires
     MULT = 4, // denotes a multiplier over 2 input wires
+    INV = 5, // denotes an inversion gate
     //OUTPUT = 5 // denotes an output gate that all parties observe in the clear
 }
 
@@ -181,10 +173,57 @@ impl Evaluator {
         handle_y: &String) -> String {
         let handle = compute_2_input_gate_output_wire_id(
             Gate::ADD, handle_x, handle_y);
-        let x = self.wire_shares.get(handle_x).unwrap();
-        let y = self.wire_shares.get(handle_y).unwrap();
-        let sum: F = x + y;
-        self.wire_shares.insert(handle.clone(), sum);
+
+        let share_x = self.get_wire(handle_x);
+        let share_y = self.get_wire(handle_y);
+
+        self.wire_shares.insert(handle.clone(), share_x + share_y);
+        handle
+    }
+
+    /// given: triple ([a], [b], [c]) and inputs ([x], [y])
+    /// reveals: x + a, y + b
+    /// computes [xy] = (x+a).(y+b) - (x+a).[b] - (y+b).[a] + [c]
+    pub async fn mult(&mut self, 
+        handle_x: &String, 
+        handle_y: &String,
+        beaver_handles: (&String, &String, &String)
+    ) -> String {
+        //desugar the beaver triple handles
+        let (handle_a, handle_b, handle_c) = beaver_handles;
+        let share_a = self.get_wire(handle_a);
+        let share_b = self.get_wire(handle_b);
+        let share_c = self.get_wire(handle_c);
+
+        // our strategy would be to re-use other components
+        //construct adder gates for the padded wires
+        let handle_x_plus_a = self.add(handle_x, handle_a);
+        let handle_y_plus_b = self.add(handle_y, handle_b);
+
+        //reconstruct the padded wires in the clear
+        let x_plus_a = self.output_wire(&handle_x_plus_a).await;
+        let y_plus_b = self.output_wire(&handle_y_plus_b).await;
+
+        let handle = compute_2_input_gate_output_wire_id(
+            Gate::MULT, handle_x, handle_y);
+        
+        //only one party should add the constant term
+        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
+        let share_x_mul_y: F = match my_id {
+            0 => {
+                x_plus_a * y_plus_b 
+                - x_plus_a * share_b 
+                - y_plus_b * share_a 
+                + share_c
+            },
+            _ => {
+                F::from(0)
+                - x_plus_a * share_b 
+                - y_plus_b * share_a 
+                + share_c
+            }
+        };
+        self.wire_shares.insert(handle.clone(), share_x_mul_y);
         handle
     }
 
@@ -260,7 +299,7 @@ impl Evaluator {
     }
 
     pub async fn output_wire(&mut self, wire_handle: &String) -> F {
-        let my_share: F = self.wire_shares.get(wire_handle).unwrap().clone();
+        let my_share = self.get_wire(wire_handle);
 
         let msg = EvalNetMsg::PublishShare {
             sender: self.id.clone(),
@@ -366,6 +405,10 @@ impl Evaluator {
             .collect::<Vec<bool>>()
             .iter()
             .all(|&b| b)
+    }
+
+    fn get_wire(&self, handle: &String) -> F {
+        self.wire_shares.get(handle).unwrap().clone()
     }
 
 }
