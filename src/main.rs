@@ -10,6 +10,7 @@ mod evaluator;
 mod address_book;
 mod common;
 mod utils;
+mod kzg;
 
 use address_book::*;
 use evaluator::*;
@@ -114,9 +115,19 @@ async fn main() {
     assert_eq!(mult_r1_r2, r1 * r2);
 
     println!("testing inverter...");
-    let h_r1_inverted = evaluator.inv(&h_r1, &h_r2, (&h_a, &h_b, &h_c)).await;
-    let r1_inverted = evaluator.output_wire(&h_r1_inverted).await;
-    assert_eq!(r1_inverted, r1 * r1_inverted);
+    let (h_a, h_b, h_c) = evaluator.beaver(1).await;
+    let h_r3 = evaluator.ran(3);
+    let h_r4 = evaluator.ran(4);
+    let r3 = evaluator.output_wire(&h_r3).await;
+    let h_r3_inverted = evaluator.inv(&h_r3, &h_r4, (&h_a, &h_b, &h_c)).await;
+    let r3_inverted = evaluator.output_wire(&h_r3_inverted).await;
+    assert_eq!(ark_bls12_377::Fr::from(1), r3 * r3_inverted);
+
+    println!("testing group exponentiator...");
+    let h_r = evaluator.ran(5);
+    let g_pow_r = evaluator.output_wire_in_exponent(&h_r).await;
+    let r = evaluator.output_wire(&h_r).await;
+    assert_eq!(g_pow_r, evaluator.group_exp(&r));
 
     println!("-------------- End compute -----------------");
 

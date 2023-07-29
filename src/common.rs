@@ -12,11 +12,10 @@ pub enum EvalNetMsg {
         handle: String,
         share: String 
     },
-    SendShare { 
-        sender: String, 
-        receiver: String, 
-        handle: String, 
-        value: String 
+    PublishShareInExponent { 
+        sender: String,
+        handle: String,
+        share: String
     },
     SendTriple { 
         sender: String, 

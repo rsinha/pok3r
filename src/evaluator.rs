@@ -1,12 +1,25 @@
+use ark_poly::univariate::DensePolynomial;
 use ark_std::UniformRand;
+use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
+use ark_ec::{pairing::Pairing, CurveGroup};
 use std::collections::HashMap;
+use std::ops::Add;
+use std::ops::Mul;
 use futures::{prelude::*, channel::*};
-
+use ark_std::io::Cursor;
+use rand::{rngs::StdRng, SeedableRng};
 use sha2::{Sha256, Digest};
 
 use crate::address_book::*;
 use crate::common::*;
 use crate::utils;
+use crate::kzg::*;
+
+type Curve = ark_bls12_377::Bls12_377;
+type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
+type F = ark_bls12_377::Fr;
+type G1 = <Curve as Pairing>::G1Affine;
+//type G2 = <Curve as Pairing>::G2Affine;
 
 pub enum Gate {
     BEAVER = 1, // denotes a beaver triple source gate that is output by pre-processing
@@ -95,7 +108,6 @@ fn compute_2_input_gate_output_wire_id(
     bs58::encode(hash).into_string()
 }
 
-type F = ark_bls12_377::Fr;
 
 macro_rules! send_over_network {
     ($msg:expr, $tx:expr) => {
@@ -117,8 +129,12 @@ pub struct Evaluator {
     rx: mpsc::UnboundedReceiver<EvalNetMsg>,
     /// stores the share associated with each wire
     wire_shares: HashMap<String, F>,
-    /// stires the partially opened values
-    openings: HashMap<String, HashMap<String, F>>
+    /// stores the partially opened shares
+    openings: HashMap<String, HashMap<String, F>>,
+    /// stores the partially opened exponentiated shares
+    exp_openings: HashMap<String, HashMap<String, G1>>,
+    /// parameters
+    params: UniversalParams<Curve>,
 }
 
 impl Evaluator {
@@ -145,13 +161,19 @@ impl Evaluator {
             }
         }
 
-        Evaluator { 
+        // fixed seed to make sure all parties use the same KZG params
+        let mut seeded_rng = StdRng::from_seed([42u8; 32]);
+        let params = KZG::setup(64, &mut seeded_rng).expect("Setup failed");
+
+        Evaluator {
+            params: params,
             id: id.clone(), 
             addr_book, 
             tx, 
             rx,
             wire_shares: HashMap::new(),
-            openings: HashMap::new()
+            openings: HashMap::new(),
+            exp_openings: HashMap::new()
         }
     }
 
@@ -378,6 +400,58 @@ impl Evaluator {
         sum
     }
 
+    pub fn group_exp(&mut self, wire: &F) -> G1 {
+        let g = self.params.powers_of_g[0];
+        g.clone().mul(wire).into_affine()
+    }
+
+    pub async fn output_wire_in_exponent(&mut self, wire_handle: &String) -> G1 {
+        let my_share = self.get_wire(wire_handle);
+        let g = self.params.powers_of_g[0];
+        let my_share_exp = g.clone().mul(my_share);
+
+        let mut serialized_data: Vec<u8> = Vec::new();
+        my_share_exp.serialize_compressed(&mut serialized_data).unwrap();
+
+        let msg = EvalNetMsg::PublishShareInExponent {
+            sender: self.id.clone(),
+            handle: wire_handle.clone(),
+            share: bs58::encode(serialized_data).into_string(),
+        };
+        send_over_network!(msg, self.tx);
+
+        let mut sum: G1 = my_share_exp.clone().into_affine();
+        let peers: Vec<Pok3rPeerId> = self.addr_book.keys().cloned().collect();
+        
+        for peer_id in peers {
+            if self.id.eq(&peer_id) { continue; }
+
+            loop {
+                if self.exp_openings.contains_key(wire_handle) {
+                    let sender_exists_for_handle = self.exp_openings
+                        .get(wire_handle)
+                        .unwrap()
+                        .contains_key(&peer_id);
+                    if sender_exists_for_handle { break; } //we already have it!
+                }
+
+                let msg: EvalNetMsg = self.rx.select_next_some().await;
+                self.process_next_message(&msg);
+            }
+
+            let received_element: G1 = self.exp_openings
+                .get(wire_handle)
+                .unwrap()
+                .get(&peer_id)
+                .unwrap()
+                .clone();
+            
+            sum = sum.add(received_element).into_affine();
+        }
+
+        sum
+    }
+
     //returns the handle which 
     fn process_next_message(&mut self, msg: &EvalNetMsg) {
         match msg {
@@ -435,6 +509,31 @@ impl Evaluator {
                     .get_mut(handle)
                     .unwrap()
                     .insert(sender.clone(), s);
+            },
+            EvalNetMsg::PublishShareInExponent { 
+                sender,
+                handle,
+                share
+            } => {
+                // if already exists, then ignore
+                if self.exp_openings.contains_key(handle) {
+                    let sender_exists_for_handle = self.exp_openings
+                        .get(handle)
+                        .unwrap()
+                        .contains_key(sender);
+                    if sender_exists_for_handle { return; } //ignore, duplicate!
+                } else {
+                    self.exp_openings.insert(handle.clone(), HashMap::new());
+                }
+
+                let decoded = bs58::decode(share).into_vec().unwrap();
+                let e: G1 = G1::deserialize_compressed(
+                    &mut Cursor::new(decoded)).unwrap();
+
+                self.exp_openings
+                    .get_mut(handle)
+                    .unwrap()
+                    .insert(sender.clone(), e);
             },
             _ => return,
         }

@@ -102,12 +102,6 @@ pub async fn run_networking_daemon(
         select! {
             //receives requests for publishing messages from the evaluator
             msg_to_send = rx.select_next_some() => {
-                // let s = match msg_to_send {
-                //     EvalNetMsg::Greeting(m) => serde_json::to_string(&m).unwrap(),
-                //     EvalNetMsg::PublishShare(m) => serde_json::to_string(&m).unwrap(),
-                //     EvalNetMsg::SendShare(m) => serde_json::to_string(&m).unwrap(),
-                //     _ => panic!("Unexpected message received by networkd"),
-                // };
                 let s = serde_json::to_string(&msg_to_send).unwrap();
                 if let Err(e) = swarm
                     .behaviour_mut().gossipsub
