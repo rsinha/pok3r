@@ -116,6 +116,11 @@ macro_rules! send_over_network {
     };
 }
 
+pub struct GateCount {
+    num_beaver: u64,
+    num_ran: u64
+}
+
 pub struct Evaluator {
     /// local peer id
     id: Pok3rPeerId,
@@ -131,6 +136,8 @@ pub struct Evaluator {
     openings: HashMap<String, HashMap<String, F>>,
     /// stores the partially opened exponentiated shares
     exp_openings: HashMap<String, HashMap<String, G1>>,
+    /// keep track of gates
+    gate_counters: GateCount
 }
 
 impl Evaluator {
@@ -168,7 +175,8 @@ impl Evaluator {
             rx,
             wire_shares: HashMap::new(),
             openings: HashMap::new(),
-            exp_openings: HashMap::new()
+            exp_openings: HashMap::new(),
+            gate_counters: GateCount { num_beaver: 0, num_ran: 0 }
         }
     }
 
@@ -189,7 +197,10 @@ impl Evaluator {
 
     /// asks the pre-processor to generate an additive sharing of a random value
     /// returns a string handle, which can be used to access the share in future
-    pub fn ran(&mut self, gate_id: u64) -> String {
+    pub fn ran(&mut self) -> String {
+        let gate_id = self.gate_counters.num_ran;
+        self.gate_counters.num_ran += 1;
+
         let r = F::rand(&mut rand::thread_rng());
 
         let handle = compute_ran_input_wire_id(gate_id);
@@ -287,7 +298,10 @@ impl Evaluator {
     }
 
     /// TODO: HACK ALERT! make this a little more secure please!
-    pub async fn beaver(&mut self, gate_id: u64) -> (String, String, String) {
+    pub async fn beaver(&mut self) -> (String, String, String) {
+        let gate_id = self.gate_counters.num_beaver;
+        self.gate_counters.num_beaver += 1;
+
         let (handle_a, handle_b, handle_c) = compute_beaver_wire_ids(gate_id);
 
         //only one party will be responsible for generating this

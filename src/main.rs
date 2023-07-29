@@ -94,15 +94,15 @@ async fn main() {
     println!("-------------- Ready to compute -----------------");
 
     println!("testing beaver triples...");
-    let (h_a, h_b, h_c) = evaluator.beaver(0).await;
+    let (h_a, h_b, h_c) = evaluator.beaver().await;
     let a = evaluator.output_wire(&h_a).await;
     let b = evaluator.output_wire(&h_b).await;
     let c = evaluator.output_wire(&h_c).await;
     assert_eq!(c, a * b);
 
     println!("testing adder...");
-    let h_r1 = evaluator.ran(1);
-    let h_r2 = evaluator.ran(2);
+    let h_r1 = evaluator.ran();
+    let h_r2 = evaluator.ran();
     let r1 = evaluator.output_wire(&h_r1).await;
     let r2 = evaluator.output_wire(&h_r2).await;
     let h_sum_r1_r2 = evaluator.add(&h_r1, &h_r2);
@@ -115,16 +115,16 @@ async fn main() {
     assert_eq!(mult_r1_r2, r1 * r2);
 
     println!("testing inverter...");
-    let (h_a, h_b, h_c) = evaluator.beaver(1).await;
-    let h_r3 = evaluator.ran(3);
-    let h_r4 = evaluator.ran(4);
+    let (h_a, h_b, h_c) = evaluator.beaver().await;
+    let h_r3 = evaluator.ran();
+    let h_r4 = evaluator.ran();
     let r3 = evaluator.output_wire(&h_r3).await;
     let h_r3_inverted = evaluator.inv(&h_r3, &h_r4, (&h_a, &h_b, &h_c)).await;
     let r3_inverted = evaluator.output_wire(&h_r3_inverted).await;
     assert_eq!(ark_bls12_377::Fr::from(1), r3 * r3_inverted);
 
     println!("testing group exponentiator...");
-    let h_r = evaluator.ran(5);
+    let h_r = evaluator.ran();
     let g_pow_r = evaluator.output_wire_in_exponent(&h_r).await;
     let r = evaluator.output_wire(&h_r).await;
     assert_eq!(g_pow_r, evaluator.group_exp(&r));
