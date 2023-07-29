@@ -1,4 +1,3 @@
-use ark_poly::univariate::DensePolynomial;
 use ark_std::UniformRand;
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
 use ark_ec::{pairing::Pairing, CurveGroup, AffineRepr};
@@ -7,16 +6,15 @@ use std::ops::Add;
 use std::ops::Mul;
 use futures::{prelude::*, channel::*};
 use ark_std::io::Cursor;
-use rand::{rngs::StdRng, SeedableRng};
+//use rand::{rngs::StdRng, SeedableRng};
 use sha2::{Sha256, Digest};
 
 use crate::address_book::*;
 use crate::common::*;
 use crate::utils;
-use crate::kzg::*;
 
 type Curve = ark_bls12_377::Bls12_377;
-type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
+//type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 type F = ark_bls12_377::Fr;
 type G1 = <Curve as Pairing>::G1Affine;
 //type G2 = <Curve as Pairing>::G2Affine;
