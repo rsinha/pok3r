@@ -1,7 +1,7 @@
 use ark_poly::univariate::DensePolynomial;
 use ark_std::UniformRand;
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
-use ark_ec::{pairing::Pairing, CurveGroup};
+use ark_ec::{pairing::Pairing, CurveGroup, AffineRepr};
 use std::collections::HashMap;
 use std::ops::Add;
 use std::ops::Mul;
@@ -133,8 +133,6 @@ pub struct Evaluator {
     openings: HashMap<String, HashMap<String, F>>,
     /// stores the partially opened exponentiated shares
     exp_openings: HashMap<String, HashMap<String, G1>>,
-    /// parameters
-    params: UniversalParams<Curve>,
 }
 
 impl Evaluator {
@@ -162,11 +160,10 @@ impl Evaluator {
         }
 
         // fixed seed to make sure all parties use the same KZG params
-        let mut seeded_rng = StdRng::from_seed([42u8; 32]);
-        let params = KZG::setup(64, &mut seeded_rng).expect("Setup failed");
+        //let mut seeded_rng = StdRng::from_seed([42u8; 32]);
+        //let params = KZG::setup(64, &mut seeded_rng).expect("Setup failed");
 
         Evaluator {
-            params: params,
             id: id.clone(), 
             addr_book, 
             tx, 
@@ -401,13 +398,13 @@ impl Evaluator {
     }
 
     pub fn group_exp(&mut self, wire: &F) -> G1 {
-        let g = self.params.powers_of_g[0];
+        let g = <Curve as Pairing>::G1Affine::generator();
         g.clone().mul(wire).into_affine()
     }
 
     pub async fn output_wire_in_exponent(&mut self, wire_handle: &String) -> G1 {
         let my_share = self.get_wire(wire_handle);
-        let g = self.params.powers_of_g[0];
+        let g = <Curve as Pairing>::G1Affine::generator();
         let my_share_exp = g.clone().mul(my_share);
 
         let mut serialized_data: Vec<u8> = Vec::new();
