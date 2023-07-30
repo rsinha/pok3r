@@ -52,6 +52,14 @@ pub fn compute_additive_shares(value: &F, num_shares: usize) -> Vec<F> {
     shares
 }
 
+pub fn compute_root(x: &F) -> F {
+    x.sqrt().unwrap()
+}
+
+pub fn compute_power(x: &F, n: u64) -> F {
+    x.pow([n])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

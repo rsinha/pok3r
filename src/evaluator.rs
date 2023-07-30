@@ -1,9 +1,9 @@
 use ark_std::UniformRand;
+use ark_ff::{Field, /* FftField */ };
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
 use ark_ec::{pairing::Pairing, CurveGroup, AffineRepr};
 use std::collections::HashMap;
-use std::ops::Add;
-use std::ops::Mul;
+use std::ops::*;
 use futures::{prelude::*, channel::*};
 use ark_std::io::Cursor;
 //use rand::{rngs::StdRng, SeedableRng};
@@ -15,7 +15,7 @@ use crate::utils;
 
 type Curve = ark_bls12_377::Bls12_377;
 //type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
-type F = ark_bls12_377::Fr;
+pub type F = ark_bls12_377::Fr;
 type G1 = <Curve as Pairing>::G1Affine;
 //type G2 = <Curve as Pairing>::G2Affine;
 
@@ -25,6 +25,7 @@ pub enum Gate {
     ADD = 3, // denotes an adder over 2 input wires
     MULT = 4, // denotes a multiplier over 2 input wires
     INV = 5, // denotes an inversion gate
+    EXP = 6, // denotes an exponentiation (by 64) gate
     //OUTPUT = 5 // denotes an output gate that all parties observe in the clear
 }
 
@@ -83,6 +84,18 @@ fn compute_ran_input_wire_id(gate_id: u64) -> String {
 fn compute_inversion_wire_id(x: &String) -> String {
     let mut hasher_input = Vec::new();
     hasher_input.extend_from_slice(&(Gate::INV as u64).to_be_bytes());
+    hasher_input.extend_from_slice(x.as_bytes());
+
+    let mut hasher = Sha256::new();
+    hasher.update(&hasher_input);
+    let hash = hasher.finalize();
+
+    bs58::encode(hash).into_string()
+}
+
+fn compute_exp_wire_id(x: &String) -> String {
+    let mut hasher_input = Vec::new();
+    hasher_input.extend_from_slice(&(Gate::EXP as u64).to_be_bytes());
     hasher_input.extend_from_slice(x.as_bytes());
 
     let mut hasher = Sha256::new();
@@ -206,6 +219,30 @@ impl Evaluator {
         let handle = compute_ran_input_wire_id(gate_id);
         self.wire_shares.insert(handle.clone(), r);
         handle
+    }
+
+    /// returns shares of a random element in {1, ω, ..., ω^63}
+    pub async fn ran_64(&mut self, h_a: &String) -> String {
+        // we will cheat a bit and use the same gate type
+        let gate_id = self.gate_counters.num_ran;
+        self.gate_counters.num_ran += 1;
+        let h_c = compute_ran_input_wire_id(gate_id);
+
+        let h_a_exp_64 = self.exp(h_a).await;
+        let a_exp_64 = self.output_wire(&h_a_exp_64).await;
+    
+        if a_exp_64 == F::from(0) {
+            panic!("Highly improbable event occurred. Abort!");
+        }
+    
+        let mut l = a_exp_64;
+        for _ in 0..6 {
+            l = utils::compute_root(&l);
+        }
+
+        let share_c = self.get_wire(h_a) / l;
+        self.wire_shares.insert(h_c.clone(), share_c);
+        h_c
     }
 
     /// outputs the wire label denoting the [x] + [y]
@@ -409,11 +446,6 @@ impl Evaluator {
         sum
     }
 
-    pub fn group_exp(&mut self, wire: &F) -> G1 {
-        let g = <Curve as Pairing>::G1Affine::generator();
-        g.clone().mul(wire).into_affine()
-    }
-
     pub async fn output_wire_in_exponent(&mut self, wire_handle: &String) -> G1 {
         let my_share = self.get_wire(wire_handle);
         let g = <Curve as Pairing>::G1Affine::generator();
@@ -459,6 +491,23 @@ impl Evaluator {
         }
 
         sum
+    }
+
+    /// returns a^64
+    pub async fn exp(&mut self, input_label: &String) -> String {
+        let mut tmp = input_label.clone();
+        for _i in 0..6 {
+            let (h_a, h_b, h_c) = self.beaver().await;
+            tmp = self.mult(
+                &tmp, 
+                &tmp, 
+                (&h_a, &h_b, &h_c)
+            ).await;
+        }
+
+        let handle = compute_exp_wire_id(input_label);
+        self.wire_shares.insert(handle.clone(), self.get_wire(&tmp));
+        handle
     }
 
     //returns the handle which 
@@ -557,9 +606,56 @@ impl Evaluator {
             .all(|&b| b)
     }
 
-    fn get_wire(&self, handle: &String) -> F {
+    pub fn get_wire(&self, handle: &String) -> F {
         self.wire_shares.get(handle).unwrap().clone()
     }
 
 }
 
+pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
+    println!("-------------- Running some sanity tests -----------------");
+
+    println!("testing beaver triples...");
+    let (h_a, h_b, h_c) = evaluator.beaver().await;
+    let a = evaluator.output_wire(&h_a).await;
+    let b = evaluator.output_wire(&h_b).await;
+    let c = evaluator.output_wire(&h_c).await;
+    assert_eq!(c, a * b);
+
+    println!("testing adder...");
+    let h_r1 = evaluator.ran();
+    let h_r2 = evaluator.ran();
+    let r1 = evaluator.output_wire(&h_r1).await;
+    let r2 = evaluator.output_wire(&h_r2).await;
+    let h_sum_r1_r2 = evaluator.add(&h_r1, &h_r2);
+    let sum_r1_r2 = evaluator.output_wire(&h_sum_r1_r2).await;
+    assert_eq!(sum_r1_r2, r1 + r2);
+
+    println!("testing multiplier...");
+    let h_mult_r1_r2 = evaluator.mult(&h_r1, &h_r2, (&h_a, &h_b, &h_c)).await;
+    let mult_r1_r2 = evaluator.output_wire(&h_mult_r1_r2).await;
+    assert_eq!(mult_r1_r2, r1 * r2);
+
+    println!("testing inverter...");
+    let (h_a, h_b, h_c) = evaluator.beaver().await;
+    let h_r3 = evaluator.ran();
+    let h_r4 = evaluator.ran();
+    let r3 = evaluator.output_wire(&h_r3).await;
+    let h_r3_inverted = evaluator.inv(&h_r3, &h_r4, (&h_a, &h_b, &h_c)).await;
+    let r3_inverted = evaluator.output_wire(&h_r3_inverted).await;
+    assert_eq!(ark_bls12_377::Fr::from(1), r3 * r3_inverted);
+
+    println!("testing exponentiator...");
+    let h_r = evaluator.ran();
+    let r = evaluator.output_wire(&h_r).await;
+    let h_r_exp_64 = evaluator.exp(&h_r).await;
+    let r_exp_64 = evaluator.output_wire(&h_r_exp_64).await;
+    assert_eq!(r.pow([64]), r_exp_64);
+
+    println!("testing output_wire and output_wire_in_exponent...");
+    let h_r = evaluator.ran();
+    let g_pow_r = evaluator.output_wire_in_exponent(&h_r).await;
+    let r = evaluator.output_wire(&h_r).await;
+    let g = <Curve as Pairing>::G1Affine::generator().clone();
+    assert_eq!(g_pow_r, g.mul(&r));
+}

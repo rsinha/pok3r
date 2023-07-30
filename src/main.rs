@@ -1,4 +1,4 @@
-use std::{thread, collections::HashMap, time::Duration};
+use std::{thread, collections::{HashMap, HashSet}, time::Duration};
 use async_std::task;
 //use std::sync::mpsc;
 use futures::channel::*;
@@ -81,7 +81,7 @@ async fn main() {
     });
     
     let addr_book = parse_addr_book_from_json();
-    let mut evaluator = Evaluator::new(&args.id, addr_book, e2n_tx, n2e_rx).await;
+    let mut mpc = Evaluator::new(&args.id, addr_book, e2n_tx, n2e_rx).await;
 
     //this is a hack until we figure out
     task::block_on(async {
@@ -89,48 +89,71 @@ async fn main() {
         println!("After sleeping for 1 second.");
     });
 
-    evaluator.test_networking().await;
-
-    println!("-------------- Ready to compute -----------------");
-
-    println!("testing beaver triples...");
-    let (h_a, h_b, h_c) = evaluator.beaver().await;
-    let a = evaluator.output_wire(&h_a).await;
-    let b = evaluator.output_wire(&h_b).await;
-    let c = evaluator.output_wire(&h_c).await;
-    assert_eq!(c, a * b);
-
-    println!("testing adder...");
-    let h_r1 = evaluator.ran();
-    let h_r2 = evaluator.ran();
-    let r1 = evaluator.output_wire(&h_r1).await;
-    let r2 = evaluator.output_wire(&h_r2).await;
-    let h_sum_r1_r2 = evaluator.add(&h_r1, &h_r2);
-    let sum_r1_r2 = evaluator.output_wire(&h_sum_r1_r2).await;
-    assert_eq!(sum_r1_r2, r1 + r2);
-
-    println!("testing multiplier...");
-    let h_mult_r1_r2 = evaluator.mult(&h_r1, &h_r2, (&h_a, &h_b, &h_c)).await;
-    let mult_r1_r2 = evaluator.output_wire(&h_mult_r1_r2).await;
-    assert_eq!(mult_r1_r2, r1 * r2);
-
-    println!("testing inverter...");
-    let (h_a, h_b, h_c) = evaluator.beaver().await;
-    let h_r3 = evaluator.ran();
-    let h_r4 = evaluator.ran();
-    let r3 = evaluator.output_wire(&h_r3).await;
-    let h_r3_inverted = evaluator.inv(&h_r3, &h_r4, (&h_a, &h_b, &h_c)).await;
-    let r3_inverted = evaluator.output_wire(&h_r3_inverted).await;
-    assert_eq!(ark_bls12_377::Fr::from(1), r3 * r3_inverted);
-
-    println!("testing group exponentiator...");
-    let h_r = evaluator.ran();
-    let g_pow_r = evaluator.output_wire_in_exponent(&h_r).await;
-    let r = evaluator.output_wire(&h_r).await;
-    assert_eq!(g_pow_r, evaluator.group_exp(&r));
-
-    println!("-------------- End compute -----------------");
+    mpc.test_networking().await;
+    evaluator::perform_sanity_testing(&mut mpc).await;
+    compute_permutation(&mut mpc).await;
 
     //eval_handle.join().unwrap();
     netd_handle.join().unwrap();
+}
+
+fn map_roots_of_unity_to_cards() -> HashMap<F, String> {
+    let mut output: HashMap<F, String> = HashMap::new();
+    
+    // get generator for the 64 powers of 64-th root of unity
+    let ω = utils::multiplicative_subgroup_of_size(64);
+
+    // map each power to a card
+    // map 52 real cards
+    for i in 0..52 {
+        let ω_pow_i = utils::compute_power(&ω, i as u64);
+        let card_name = i.to_string();
+        output.insert(ω_pow_i, card_name);
+    }
+
+    //and 12 jokers
+    for i in 52..64 {
+        let ω_pow_i = utils::compute_power(&ω, i as u64);
+        output.insert(ω_pow_i, String::from("Joker"));
+    }
+
+    output
+}
+
+async fn compute_permutation(evaluator: &mut Evaluator) {
+    println!("-------------- Starting Pok3r shuffle -----------------");
+
+    //step 1: parties invoke F_RAN to obtain [sk]
+    let sk = evaluator.ran();
+
+    let mut cards = Vec::new();
+    let mut prfs = HashSet::new();
+
+    while cards.len() < 64 { //until you get 64 unique cards
+        let h_r = evaluator.ran();
+        let (h_a, h_b, h_c) = evaluator.beaver().await;
+
+        let a_i = evaluator.ran();
+        let c_i = evaluator.ran_64(&a_i).await;
+        let t_i = evaluator.add(&c_i, &sk);
+        let t_i = evaluator.inv(
+            &t_i, &h_r, (&h_a, &h_b, &h_c)).await;
+
+        let y_i = evaluator.output_wire_in_exponent(&t_i).await;
+
+        //add card if it hasnt been seen before
+        if ! prfs.contains(&y_i) {
+            prfs.insert(y_i.clone());
+            cards.push((c_i.clone(), evaluator.get_wire(&c_i)));
+        }
+    }
+
+    let card_mapping = map_roots_of_unity_to_cards();
+    for (h_c, _card_share) in cards {
+        let opened_card = evaluator.output_wire(&h_c).await;
+        println!("{}", card_mapping.get(&opened_card).unwrap());
+    }
+
+    println!("-------------- Ending Pok3r shuffle -----------------");
+
 }
