@@ -91,7 +91,7 @@ async fn main() {
 
     mpc.test_networking().await;
     evaluator::perform_sanity_testing(&mut mpc).await;
-    compute_permutation(&mut mpc).await;
+    shuffle_deck(&mut mpc).await;
 
     //eval_handle.join().unwrap();
     netd_handle.join().unwrap();
@@ -120,13 +120,15 @@ fn map_roots_of_unity_to_cards() -> HashMap<F, String> {
     output
 }
 
-async fn compute_permutation(evaluator: &mut Evaluator) {
+async fn shuffle_deck(evaluator: &mut Evaluator) {
     println!("-------------- Starting Pok3r shuffle -----------------");
 
     //step 1: parties invoke F_RAN to obtain [sk]
     let sk = evaluator.ran();
 
+    //stores (handle, wire value) pairs
     let mut cards = Vec::new();
+    //stores set of card prfs encountered
     let mut prfs = HashSet::new();
 
     while cards.len() < 64 { //until you get 64 unique cards
@@ -137,8 +139,12 @@ async fn compute_permutation(evaluator: &mut Evaluator) {
         let c_i = evaluator.ran_64(&a_i).await;
         let t_i = evaluator.add(&c_i, &sk);
         let t_i = evaluator.inv(
-            &t_i, &h_r, (&h_a, &h_b, &h_c)).await;
+            &t_i,
+            &h_r,
+            (&h_a, &h_b, &h_c)
+        ).await;
 
+        // y_i = g^{1 / (sk + w_i)}
         let y_i = evaluator.output_wire_in_exponent(&t_i).await;
 
         //add card if it hasnt been seen before
@@ -157,3 +163,62 @@ async fn compute_permutation(evaluator: &mut Evaluator) {
     println!("-------------- Ending Pok3r shuffle -----------------");
 
 }
+
+
+async fn compute_permutation_argument(
+    evaluator: &mut Evaluator,
+    card_shares: &Vec<F>
+) {
+    let mut r_is = vec![]; //vector of (handle, share_value) pairs
+    let mut r_inv_is = vec![]; //vector of (handle, share_value) pairs
+
+    for _i in 0..53 {
+        let (h_a, h_b, h_c) = evaluator.beaver().await;
+        let h_t = evaluator.ran();
+
+        let h_r_i = evaluator.ran();
+        let h_r_inv_i = evaluator.inv(
+            &h_r_i,
+            &h_t,
+            (&h_a, &h_b, &h_c)
+        ).await;
+
+        r_is.push((h_r_i.clone(), evaluator.get_wire(&h_r_i)));
+        r_inv_is.push((h_r_inv_i.clone(), evaluator.get_wire(&h_r_inv_i)));
+    }
+
+    let mut b_is = vec![]; //vector of (handle, share_value) pairs
+    for i in 0..52 {
+        let (h_a, h_b, h_c) = evaluator.beaver().await;
+
+        let h_r_inv_0 = &r_inv_is.get(0).unwrap().0;
+        let h_r_i_plus_1 = &r_is.get(i+1).unwrap().0;
+
+        let h_b_i = evaluator.mult(
+            h_r_inv_0,
+            h_r_i_plus_1,
+            (&h_a, &h_b, &h_c)
+        ).await;
+
+        b_is.push((h_b_i.clone(), evaluator.get_wire(&h_b_i)));
+    }
+
+    let f_name = String::from("f");
+    let f_share = utils::interpolate_poly_over_mult_subgroup(card_shares);
+    let f_share_com = utils::commit_poly(&f_share);
+    let f_com = evaluator.add_group_elements(&f_share_com, &f_name).await;
+
+    let ω = utils::multiplicative_subgroup_of_size(64);
+    let v_evals: Vec<F> = (0..52)
+        .into_iter()
+        .map(|i| utils::compute_power(&ω, i as u64))
+        .collect();
+    let v = utils::interpolate_poly_over_mult_subgroup(&v_evals);
+    let v_com = utils::commit_poly(&v);
+
+    //let γ1 = fiat_shamir_hash(f_com, v_com);
+
+
+
+}
+

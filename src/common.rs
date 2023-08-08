@@ -17,6 +17,11 @@ pub enum EvalNetMsg {
         handle: String,
         share: String
     },
+    PublishCommitment { 
+        sender: String,
+        handle: String,
+        commitment: String
+    },
     SendTriple { 
         sender: String, 
         receiver: String, 

@@ -149,6 +149,8 @@ pub struct Evaluator {
     openings: HashMap<String, HashMap<String, F>>,
     /// stores the partially opened exponentiated shares
     exp_openings: HashMap<String, HashMap<String, G1>>,
+    /// stores the commitments on polynomial shares
+    commitments: HashMap<String, HashMap<String, G1>>,
     /// keep track of gates
     gate_counters: GateCount
 }
@@ -177,10 +179,6 @@ impl Evaluator {
             }
         }
 
-        // fixed seed to make sure all parties use the same KZG params
-        //let mut seeded_rng = StdRng::from_seed([42u8; 32]);
-        //let params = KZG::setup(64, &mut seeded_rng).expect("Setup failed");
-
         Evaluator {
             id: id.clone(), 
             addr_book, 
@@ -189,6 +187,7 @@ impl Evaluator {
             wire_shares: HashMap::new(),
             openings: HashMap::new(),
             exp_openings: HashMap::new(),
+            commitments: HashMap::new(),
             gate_counters: GateCount { num_beaver: 0, num_ran: 0 }
         }
     }
@@ -493,6 +492,49 @@ impl Evaluator {
         sum
     }
 
+    pub async fn add_group_elements(&mut self, e: &G1, func_name: &String) -> G1 {
+        let mut serialized_data: Vec<u8> = Vec::new();
+        e.serialize_compressed(&mut serialized_data).unwrap();
+
+        let msg = EvalNetMsg::PublishCommitment {
+            sender: self.id.clone(),
+            handle: func_name.clone(),
+            commitment: bs58::encode(serialized_data).into_string(),
+        };
+        send_over_network!(msg, self.tx);
+
+        let mut sum: G1 = e.clone();
+        let peers: Vec<Pok3rPeerId> = self.addr_book.keys().cloned().collect();
+        
+        for peer_id in peers {
+            if self.id.eq(&peer_id) { continue; }
+
+            loop {
+                if self.commitments.contains_key(func_name) {
+                    let sender_exists_for_handle = self.commitments
+                        .get(func_name)
+                        .unwrap()
+                        .contains_key(&peer_id);
+                    if sender_exists_for_handle { break; } //we already have it!
+                }
+
+                let msg: EvalNetMsg = self.rx.select_next_some().await;
+                self.process_next_message(&msg);
+            }
+
+            let received_element: G1 = self.commitments
+                .get(func_name)
+                .unwrap()
+                .get(&peer_id)
+                .unwrap()
+                .clone();
+            
+            sum = sum.add(received_element).into_affine();
+        }
+
+        sum
+    }
+
     /// returns a^64
     pub async fn exp(&mut self, input_label: &String) -> String {
         let mut tmp = input_label.clone();
@@ -589,6 +631,31 @@ impl Evaluator {
                     &mut Cursor::new(decoded)).unwrap();
 
                 self.exp_openings
+                    .get_mut(handle)
+                    .unwrap()
+                    .insert(sender.clone(), e);
+            },
+            EvalNetMsg::PublishCommitment { 
+                sender,
+                handle,
+                commitment
+            } => {
+                // if already exists, then ignore
+                if self.commitments.contains_key(handle) {
+                    let sender_exists_for_handle = self.commitments
+                        .get(handle)
+                        .unwrap()
+                        .contains_key(sender);
+                    if sender_exists_for_handle { return; } //ignore, duplicate!
+                } else {
+                    self.commitments.insert(handle.clone(), HashMap::new());
+                }
+
+                let decoded = bs58::decode(commitment).into_vec().unwrap();
+                let e: G1 = G1::deserialize_compressed(
+                    &mut Cursor::new(decoded)).unwrap();
+
+                self.commitments
                     .get_mut(handle)
                     .unwrap()
                     .insert(sender.clone(), e);

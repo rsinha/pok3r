@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+use rand::{rngs::StdRng, SeedableRng};
 use ark_ff::{Field, FftField, PrimeField};
 use ark_std::{UniformRand, test_rng, ops::*};
 use ark_poly::{
@@ -10,10 +11,14 @@ use ark_poly::{
     Radix2EvaluationDomain,
     Evaluations
 };
+use ark_ec::{pairing::Pairing, CurveGroup};
 use ark_serialize::*;
-use serde::__private::de::IdentifierDeserializer;
 
+type Curve = ark_bls12_377::Bls12_377;
+type KZG = crate::kzg::KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 type F = ark_bls12_377::Fr;
+type G1 = <Curve as Pairing>::G1Affine;
+type G2 = <Curve as Pairing>::G2Affine;
 
 macro_rules! requires_power_of_2 {
     ($x:expr) => {
@@ -26,6 +31,28 @@ pub fn multiplicative_subgroup_of_size(n: u64) -> F {
     requires_power_of_2!(n);
     let domain = Radix2EvaluationDomain::<F>::new(n as usize).unwrap();
     domain.group_gen
+}
+
+/// interpolate polynomial which evaluates to points in v
+/// the domain is the powers of n-th root of unity, where n is size of v
+/// assumes n is a power of 2
+pub fn interpolate_poly_over_mult_subgroup(v: &Vec<F>) -> DensePolynomial<F> {
+    let n = v.len();
+    let mut evals = vec![];
+    for i in 0..n {
+        evals.push(v[i]);
+    }
+
+    let domain = Radix2EvaluationDomain::<F>::new(n).unwrap();
+    let eval_form = Evaluations::from_vec_and_domain(evals, domain);
+    eval_form.interpolate()
+}
+
+pub fn commit_poly(f: &DensePolynomial<F>) -> G1 {
+    // fixed seed to make sure all parties use the same KZG params
+    let mut seeded_rng = StdRng::from_seed([42u8; 32]);
+    let params = KZG::setup(f.degree(), &mut seeded_rng).expect("Setup failed");
+    KZG::commit_g1(&params, f).unwrap()
 }
 
 pub fn field_to_bytes(x: &F) -> Vec<u8> {
