@@ -1,7 +1,10 @@
+use ark_ec::Group;
+use ark_ec::pairing::PairingOutput;
 use ark_std::UniformRand;
 use ark_ff::{Field, /* FftField */ };
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
 use ark_ec::{pairing::Pairing, CurveGroup, AffineRepr};
+use ark_std::Zero;
 use std::collections::HashMap;
 use std::ops::*;
 use futures::{prelude::*, channel::*};
@@ -17,7 +20,8 @@ type Curve = ark_bls12_377::Bls12_377;
 //type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 pub type F = ark_bls12_377::Fr;
 type G1 = <Curve as Pairing>::G1Affine;
-//type G2 = <Curve as Pairing>::G2Affine;
+type G2 = <Curve as Pairing>::G2Affine;
+type Gt = PairingOutput<Curve>;
 
 pub enum Gate {
     BEAVER = 1, // denotes a beaver triple source gate that is output by pre-processing
@@ -533,6 +537,63 @@ impl Evaluator {
         }
 
         sum
+    }
+
+    pub async fn exp_and_reveal(&mut self, bases: Vec<G>, exponent_handles: Vec<&String>, func_name: &String) -> G {
+        let mut sum = G::zero();
+        
+        // Compute \sum_i g_i^[x_i]
+        for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
+            let my_share = self.get_wire(exponent_handle);
+            let g = base.clone();
+            let g_exp = g.clone().mul(my_share);
+
+            sum = sum.add(g_exp).into_affine();
+        }
+
+        self.add_group_elements(&sum, func_name).await
+    }
+
+    pub async fn exp_and_reveal2(&mut self, bases: Vec<Gt>, exponent_handles: Vec<&String>, func_name: &String) -> Gt {
+        let mut sum = Gt::zero();
+        
+        // Compute \sum_i g_i^[x_i]
+        for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
+            let my_share = self.get_wire(exponent_handle);
+            let g = base.clone();
+            let g_exp = g.clone().mul(my_share);
+
+            sum = sum.add(g_exp);
+        }
+
+        self.add_group_elements(&sum, func_name).await
+    }
+
+    pub async fn ibe_encrypt(&mut self, msg_handle: &String, mask_handle: &String, pk: &G2, hash_id :&G1) -> (G1, Gt) {
+        let msg_share = self.output_wire_in_exponent(msg_handle).await;
+        let mask_share = self.output_wire_in_exponent(mask_handle).await;
+
+        // sample random element
+        let r = self.ran();
+
+        let g = <Curve as Pairing>::G1Affine::generator();
+        let g_target = Gt::generator();
+
+        let h = <Curve as Pairing>::pairing(hash_id, pk);
+
+        let c1 = self.exp_and_reveal(
+            vec![g.clone()], 
+            vec![&r], 
+            &String::from("c1")
+        ).await;
+        
+        let c2 = self.exp_and_reveal2(
+            vec![g_target.clone(), h.clone()], 
+            vec![msg_handle, &r], 
+            &String::from("c2")
+        ).await;
+
+        (c1, c2)
     }
 
     /// returns a^64
