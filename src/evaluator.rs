@@ -427,23 +427,24 @@ impl Evaluator {
     }
 
     // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
+    // we will use G1
     pub async fn output_wire_in_exponent(&mut self, wire_handle: &String) -> G1 {
         let my_share = self.get_wire(wire_handle);
         let g = <Curve as Pairing>::G1Affine::generator();
         let my_share_exp = g.clone().mul(my_share).into_affine();
         
-        self.add_group_elements_from_all_parties(
+        self.add_g1_elements_from_all_parties(
             &my_share_exp, 
             wire_handle
         ).await
     }
 
     // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
-    pub async fn add_group_elements_from_all_parties(
+    pub async fn add_g1_elements_from_all_parties(
         &mut self, value: &G1, 
         identifier: &String
     ) -> G1 {
-        
+
         let msg = EvalNetMsg::PublishValue {
             sender: self.id.clone(),
             handle: identifier.clone(),
@@ -463,72 +464,93 @@ impl Evaluator {
         sum
     }
 
+    // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
+    pub async fn add_gt_elements_from_all_parties(
+        &mut self, value: &Gt, 
+        identifier: &String
+    ) -> Gt {
+
+        let msg = EvalNetMsg::PublishValue {
+            sender: self.id.clone(),
+            handle: identifier.clone(),
+            value: encode_gt_as_bs58_str(value),
+        };
+        send_over_network!(msg, self.tx);
+
+        let incoming_msgs = self.collect_messages_from_all_peers(identifier).await;
+
+        let incoming_values: Vec<Gt> = incoming_msgs
+            .into_iter()
+            .map(|x| decode_bs58_str_as_gt(&x))
+            .collect();
+
+        let mut sum: Gt = value.clone();
+        for v in incoming_values { sum = sum.add(v); }
+        sum
+    }
+
     // secret-shared MSM, where scalars are secret shares. Outputs MSM in the clear.
-    // pub async fn exp_and_reveal_gt(
-    //     &mut self, 
-    //     bases: Vec<Gt>, 
-    //     exponent_handles: Vec<&String>, 
-    //     func_name: &String
-    // ) -> Gt {
-    //     let mut sum = Gt::zero();
+    pub async fn exp_and_reveal_gt(
+        &mut self, 
+        bases: Vec<Gt>, 
+        exponent_handles: Vec<&String>, 
+        func_name: &String
+    ) -> Gt {
+        let mut sum = Gt::zero();
         
-    //     // Compute \sum_i g_i^[x_i]
-    //     for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
-    //         let my_share = self.get_wire(exponent_handle);
-    //         let exponentiated = base.clone().mul(my_share);
+        // Compute \sum_i g_i^[x_i]
+        for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
+            let my_share = self.get_wire(exponent_handle);
+            let exponentiated = base.clone().mul(my_share);
 
-    //         sum = sum.add(exponentiated);
-    //     }
+            sum = sum.add(exponentiated);
+        }
 
-    //     self.add_gt_group_elements_from_all_parties(&sum, func_name).await
-    // }
+        self.add_gt_elements_from_all_parties(&sum, func_name).await
+    }
 
-    // // secret-shared MSM, where scalars are secret shares. Outputs MSM in the clear.
-    // pub async fn exp_and_reveal_g1(
-    //     &mut self, 
-    //     bases: Vec<G1>, 
-    //     exponent_handles: Vec<&String>, 
-    //     func_name: &String
-    // ) -> G1 {
-    //     let mut sum = G1::zero();
+    // secret-shared MSM, where scalars are secret shares. Outputs MSM in the clear.
+    pub async fn exp_and_reveal_g1(
+        &mut self, 
+        bases: Vec<G1>, 
+        exponent_handles: Vec<&String>, 
+        func_name: &String
+    ) -> G1 {
+        let mut sum = G1::zero();
         
-    //     // Compute \sum_i g_i^[x_i]
-    //     for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
-    //         let my_share = self.get_wire(exponent_handle);
-    //         let exponentiated = base.clone().mul(my_share).into_affine();
+        // Compute \sum_i g_i^[x_i]
+        for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
+            let my_share = self.get_wire(exponent_handle);
+            let exponentiated = base.clone().mul(my_share).into_affine();
 
-    //         sum = sum.add(exponentiated).into_affine();
-    //     }
+            sum = sum.add(exponentiated).into_affine();
+        }
 
-    //     self.add_g1_group_elements_from_all_parties(&sum, func_name).await
-    // }
+        self.add_g1_elements_from_all_parties(&sum, func_name).await
+    }
 
-    // pub async fn ibe_encrypt(&mut self, msg_handle: &String, mask_handle: &String, pk: &G2, hash_id :&G1) -> (G1, Gt) {
-    //     let msg_share = self.output_wire_in_exponent(msg_handle).await;
-    //     let mask_share = self.output_wire_in_exponent(mask_handle).await;
+    pub async fn ibe_encrypt(&mut self, msg_handle: &String, mask_handle: &String, pk: &G2, hash_id :&G1) -> (G1, Gt) {
+        let msg_share = self.output_wire_in_exponent(msg_handle).await;
+        let mask_share = self.output_wire_in_exponent(mask_handle).await;
 
-    //     // sample random element
-    //     let r = self.ran();
+        // sample random element
+        let r = self.ran();
+        let h = <Curve as Pairing>::pairing(hash_id, pk);
 
-    //     let g = <Curve as Pairing>::G1Affine::generator();
-    //     let g_target = Gt::generator();
-
-    //     let h = <Curve as Pairing>::pairing(hash_id, pk);
-
-    //     let c1 = self.exp_and_reveal(
-    //         vec![g.clone()], 
-    //         vec![&r], 
-    //         &String::from("c1")
-    //     ).await;
+        let c1 = self.exp_and_reveal_g1(
+            vec![<Curve as Pairing>::G1Affine::generator()], 
+            vec![&r], 
+            &String::from("c1")
+        ).await;
         
-    //     let c2 = self.exp_and_reveal2(
-    //         vec![g_target.clone(), h.clone()], 
-    //         vec![msg_handle, &r], 
-    //         &String::from("c2")
-    //     ).await;
+        let c2 = self.exp_and_reveal_gt(
+            vec![Gt::generator(), h.clone()], 
+            vec![msg_handle, &r], 
+            &String::from("c2")
+        ).await;
 
-    //     (c1, c2)
-    // }
+        (c1, c2)
+    }
 
     /// returns a^64
     pub async fn exp(&mut self, input_label: &String) -> String {

@@ -206,7 +206,7 @@ async fn _compute_permutation_argument(
     let f_name = String::from("f");
     let f_share = utils::interpolate_poly_over_mult_subgroup(card_shares);
     let f_share_com = utils::commit_poly(&f_share);
-    let f_com = evaluator.add_group_elements_from_all_parties(&f_share_com, &f_name).await;
+    let f_com = evaluator.add_g1_elements_from_all_parties(&f_share_com, &f_name).await;
 
     let ω = utils::multiplicative_subgroup_of_size(64);
     let v_evals: Vec<F> = (0..52)
