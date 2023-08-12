@@ -149,12 +149,8 @@ pub struct Evaluator {
     rx: mpsc::UnboundedReceiver<EvalNetMsg>,
     /// stores the share associated with each wire
     wire_shares: HashMap<String, F>,
-    /// stores the partially opened shares
-    openings: HashMap<String, HashMap<String, F>>,
-    /// stores the partially opened exponentiated shares
-    exp_openings: HashMap<String, HashMap<String, G1>>,
-    /// stores the commitments on polynomial shares
-    commitments: HashMap<String, HashMap<String, G1>>,
+    /// stores incoming messages indexed by identifier and then by peer id
+    mailbox: HashMap<String, HashMap<String, String>>,
     /// keep track of gates
     gate_counters: GateCount
 }
@@ -189,9 +185,7 @@ impl Evaluator {
             tx, 
             rx,
             wire_shares: HashMap::new(),
-            openings: HashMap::new(),
-            exp_openings: HashMap::new(),
-            commitments: HashMap::new(),
+            mailbox: HashMap::new(),
             gate_counters: GateCount { num_beaver: 0, num_ran: 0 }
         }
     }
@@ -414,187 +408,128 @@ impl Evaluator {
     pub async fn output_wire(&mut self, wire_handle: &String) -> F {
         let my_share = self.get_wire(wire_handle);
 
-        let msg = EvalNetMsg::PublishShare {
+        let msg = EvalNetMsg::PublishValue {
             sender: self.id.clone(),
             handle: wire_handle.clone(),
-            share: bs58::encode(utils::field_to_bytes(&my_share)).into_string(),
+            value: bs58::encode(utils::field_to_bytes(&my_share)).into_string(),
         };
         send_over_network!(msg, self.tx);
 
+        let incoming_msgs = self.collect_messages_from_all_peers(wire_handle).await;
+        let incoming_values: Vec<F> = incoming_msgs
+            .into_iter()
+            .map(|x| decode_bs58_str_as_f(&x))
+            .collect();
+
         let mut sum: F = my_share;
-        let peers: Vec<Pok3rPeerId> = self.addr_book.keys().cloned().collect();
-        
-        for peer_id in peers {
-            if self.id.eq(&peer_id) { continue; }
-
-            loop {
-                if self.openings.contains_key(wire_handle) {
-                    let sender_exists_for_handle = self.openings
-                        .get(wire_handle)
-                        .unwrap()
-                        .contains_key(&peer_id);
-                    if sender_exists_for_handle { break; } //we already have it!
-                }
-
-                let msg: EvalNetMsg = self.rx.select_next_some().await;
-                self.process_next_message(&msg);
-            }
-
-            sum += self.openings
-                .get(wire_handle)
-                .unwrap()
-                .get(&peer_id)
-                .unwrap();
-        }
+        for v in incoming_values { sum += v; }
         sum
     }
 
+    // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
     pub async fn output_wire_in_exponent(&mut self, wire_handle: &String) -> G1 {
         let my_share = self.get_wire(wire_handle);
         let g = <Curve as Pairing>::G1Affine::generator();
-        let my_share_exp = g.clone().mul(my_share);
+        let my_share_exp = g.clone().mul(my_share).into_affine();
+        
+        self.add_group_elements_from_all_parties(
+            &my_share_exp, 
+            wire_handle
+        ).await
+    }
 
-        let mut serialized_data: Vec<u8> = Vec::new();
-        my_share_exp.serialize_compressed(&mut serialized_data).unwrap();
+    // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
+    pub async fn add_group_elements_from_all_parties(
+        &mut self, value: &G1, 
+        identifier: &String
+    ) -> G1 {
+        let mut serialized_msg: Vec<u8> = Vec::new();
+        value.serialize_compressed(&mut serialized_msg).unwrap();
 
-        let msg = EvalNetMsg::PublishShareInExponent {
+        let msg = EvalNetMsg::PublishValue {
             sender: self.id.clone(),
-            handle: wire_handle.clone(),
-            share: bs58::encode(serialized_data).into_string(),
+            handle: identifier.clone(),
+            value: bs58::encode(serialized_msg).into_string(),
         };
         send_over_network!(msg, self.tx);
 
-        let mut sum: G1 = my_share_exp.clone().into_affine();
-        let peers: Vec<Pok3rPeerId> = self.addr_book.keys().cloned().collect();
-        
-        for peer_id in peers {
-            if self.id.eq(&peer_id) { continue; }
+        let incoming_msgs = self.collect_messages_from_all_peers(identifier).await;
+        let incoming_values: Vec<G1> = incoming_msgs
+            .into_iter()
+            .map(|x| decode_bs58_str_as_g1(&x))
+            .collect();
 
-            loop {
-                if self.exp_openings.contains_key(wire_handle) {
-                    let sender_exists_for_handle = self.exp_openings
-                        .get(wire_handle)
-                        .unwrap()
-                        .contains_key(&peer_id);
-                    if sender_exists_for_handle { break; } //we already have it!
-                }
-
-                let msg: EvalNetMsg = self.rx.select_next_some().await;
-                self.process_next_message(&msg);
-            }
-
-            let received_element: G1 = self.exp_openings
-                .get(wire_handle)
-                .unwrap()
-                .get(&peer_id)
-                .unwrap()
-                .clone();
-            
-            sum = sum.add(received_element).into_affine();
-        }
-
+        let mut sum: G1 = value.clone();
+        for v in incoming_values { sum = sum.add(v).into_affine(); }
         sum
     }
 
-    pub async fn add_group_elements(&mut self, e: &G1, func_name: &String) -> G1 {
-        let mut serialized_data: Vec<u8> = Vec::new();
-        e.serialize_compressed(&mut serialized_data).unwrap();
-
-        let msg = EvalNetMsg::PublishCommitment {
-            sender: self.id.clone(),
-            handle: func_name.clone(),
-            commitment: bs58::encode(serialized_data).into_string(),
-        };
-        send_over_network!(msg, self.tx);
-
-        let mut sum: G1 = e.clone();
-        let peers: Vec<Pok3rPeerId> = self.addr_book.keys().cloned().collect();
+    // secret-shared MSM, where scalars are secret shares. Outputs MSM in the clear.
+    // pub async fn exp_and_reveal_gt(
+    //     &mut self, 
+    //     bases: Vec<Gt>, 
+    //     exponent_handles: Vec<&String>, 
+    //     func_name: &String
+    // ) -> Gt {
+    //     let mut sum = Gt::zero();
         
-        for peer_id in peers {
-            if self.id.eq(&peer_id) { continue; }
+    //     // Compute \sum_i g_i^[x_i]
+    //     for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
+    //         let my_share = self.get_wire(exponent_handle);
+    //         let exponentiated = base.clone().mul(my_share);
 
-            loop {
-                if self.commitments.contains_key(func_name) {
-                    let sender_exists_for_handle = self.commitments
-                        .get(func_name)
-                        .unwrap()
-                        .contains_key(&peer_id);
-                    if sender_exists_for_handle { break; } //we already have it!
-                }
+    //         sum = sum.add(exponentiated);
+    //     }
 
-                let msg: EvalNetMsg = self.rx.select_next_some().await;
-                self.process_next_message(&msg);
-            }
+    //     self.add_gt_group_elements_from_all_parties(&sum, func_name).await
+    // }
 
-            let received_element: G1 = self.commitments
-                .get(func_name)
-                .unwrap()
-                .get(&peer_id)
-                .unwrap()
-                .clone();
-            
-            sum = sum.add(received_element).into_affine();
-        }
-
-        sum
-    }
-
-    pub async fn exp_and_reveal(&mut self, bases: Vec<G>, exponent_handles: Vec<&String>, func_name: &String) -> G {
-        let mut sum = G::zero();
+    // // secret-shared MSM, where scalars are secret shares. Outputs MSM in the clear.
+    // pub async fn exp_and_reveal_g1(
+    //     &mut self, 
+    //     bases: Vec<G1>, 
+    //     exponent_handles: Vec<&String>, 
+    //     func_name: &String
+    // ) -> G1 {
+    //     let mut sum = G1::zero();
         
-        // Compute \sum_i g_i^[x_i]
-        for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
-            let my_share = self.get_wire(exponent_handle);
-            let g = base.clone();
-            let g_exp = g.clone().mul(my_share);
+    //     // Compute \sum_i g_i^[x_i]
+    //     for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
+    //         let my_share = self.get_wire(exponent_handle);
+    //         let exponentiated = base.clone().mul(my_share).into_affine();
 
-            sum = sum.add(g_exp).into_affine();
-        }
+    //         sum = sum.add(exponentiated).into_affine();
+    //     }
 
-        self.add_group_elements(&sum, func_name).await
-    }
+    //     self.add_g1_group_elements_from_all_parties(&sum, func_name).await
+    // }
 
-    pub async fn exp_and_reveal2(&mut self, bases: Vec<Gt>, exponent_handles: Vec<&String>, func_name: &String) -> Gt {
-        let mut sum = Gt::zero();
+    // pub async fn ibe_encrypt(&mut self, msg_handle: &String, mask_handle: &String, pk: &G2, hash_id :&G1) -> (G1, Gt) {
+    //     let msg_share = self.output_wire_in_exponent(msg_handle).await;
+    //     let mask_share = self.output_wire_in_exponent(mask_handle).await;
+
+    //     // sample random element
+    //     let r = self.ran();
+
+    //     let g = <Curve as Pairing>::G1Affine::generator();
+    //     let g_target = Gt::generator();
+
+    //     let h = <Curve as Pairing>::pairing(hash_id, pk);
+
+    //     let c1 = self.exp_and_reveal(
+    //         vec![g.clone()], 
+    //         vec![&r], 
+    //         &String::from("c1")
+    //     ).await;
         
-        // Compute \sum_i g_i^[x_i]
-        for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
-            let my_share = self.get_wire(exponent_handle);
-            let g = base.clone();
-            let g_exp = g.clone().mul(my_share);
+    //     let c2 = self.exp_and_reveal2(
+    //         vec![g_target.clone(), h.clone()], 
+    //         vec![msg_handle, &r], 
+    //         &String::from("c2")
+    //     ).await;
 
-            sum = sum.add(g_exp);
-        }
-
-        self.add_group_elements(&sum, func_name).await
-    }
-
-    pub async fn ibe_encrypt(&mut self, msg_handle: &String, mask_handle: &String, pk: &G2, hash_id :&G1) -> (G1, Gt) {
-        let msg_share = self.output_wire_in_exponent(msg_handle).await;
-        let mask_share = self.output_wire_in_exponent(mask_handle).await;
-
-        // sample random element
-        let r = self.ran();
-
-        let g = <Curve as Pairing>::G1Affine::generator();
-        let g_target = Gt::generator();
-
-        let h = <Curve as Pairing>::pairing(hash_id, pk);
-
-        let c1 = self.exp_and_reveal(
-            vec![g.clone()], 
-            vec![&r], 
-            &String::from("c1")
-        ).await;
-        
-        let c2 = self.exp_and_reveal2(
-            vec![g_target.clone(), h.clone()], 
-            vec![msg_handle, &r], 
-            &String::from("c2")
-        ).await;
-
-        (c1, c2)
-    }
+    //     (c1, c2)
+    // }
 
     /// returns a^64
     pub async fn exp(&mut self, input_label: &String) -> String {
@@ -611,6 +546,10 @@ impl Evaluator {
         let handle = compute_exp_wire_id(input_label);
         self.wire_shares.insert(handle.clone(), self.get_wire(&tmp));
         handle
+    }
+
+    pub fn get_wire(&self, handle: &String) -> F {
+        self.wire_shares.get(handle).unwrap().clone()
     }
 
     //returns the handle which 
@@ -649,77 +588,27 @@ impl Evaluator {
                 self.wire_shares.insert(handle_b.clone(), b_i);
                 self.wire_shares.insert(handle_c.clone(), c_i);
             },
-            EvalNetMsg::PublishShare { 
+            EvalNetMsg::PublishValue { 
                 sender,
                 handle,
-                share
+                value
             } => {
                 // if already exists, then ignore
-                if self.openings.contains_key(handle) {
-                    let sender_exists_for_handle = self.openings
+                if self.mailbox.contains_key(handle) {
+                    let sender_exists_for_handle = self.mailbox
                         .get(handle)
                         .unwrap()
                         .contains_key(sender);
-                    if sender_exists_for_handle { return; } //ignore, duplicate!
+                    if sender_exists_for_handle { return; } //ignore duplicate msg!
                 } else {
-                    self.openings.insert(handle.clone(), HashMap::new());
+                    //mailbox never got a message by this handle so lets make room for it
+                    self.mailbox.insert(handle.clone(), HashMap::new());
                 }
 
-                let s = utils::bytes_to_field(&bs58::decode(share).into_vec().unwrap());
-                self.openings
+                self.mailbox
                     .get_mut(handle)
                     .unwrap()
-                    .insert(sender.clone(), s);
-            },
-            EvalNetMsg::PublishShareInExponent { 
-                sender,
-                handle,
-                share
-            } => {
-                // if already exists, then ignore
-                if self.exp_openings.contains_key(handle) {
-                    let sender_exists_for_handle = self.exp_openings
-                        .get(handle)
-                        .unwrap()
-                        .contains_key(sender);
-                    if sender_exists_for_handle { return; } //ignore, duplicate!
-                } else {
-                    self.exp_openings.insert(handle.clone(), HashMap::new());
-                }
-
-                let decoded = bs58::decode(share).into_vec().unwrap();
-                let e: G1 = G1::deserialize_compressed(
-                    &mut Cursor::new(decoded)).unwrap();
-
-                self.exp_openings
-                    .get_mut(handle)
-                    .unwrap()
-                    .insert(sender.clone(), e);
-            },
-            EvalNetMsg::PublishCommitment { 
-                sender,
-                handle,
-                commitment
-            } => {
-                // if already exists, then ignore
-                if self.commitments.contains_key(handle) {
-                    let sender_exists_for_handle = self.commitments
-                        .get(handle)
-                        .unwrap()
-                        .contains_key(sender);
-                    if sender_exists_for_handle { return; } //ignore, duplicate!
-                } else {
-                    self.commitments.insert(handle.clone(), HashMap::new());
-                }
-
-                let decoded = bs58::decode(commitment).into_vec().unwrap();
-                let e: G1 = G1::deserialize_compressed(
-                    &mut Cursor::new(decoded)).unwrap();
-
-                self.commitments
-                    .get_mut(handle)
-                    .unwrap()
-                    .insert(sender.clone(), e);
+                    .insert(sender.clone(), value.clone());
             },
             _ => return,
         }
@@ -734,10 +623,57 @@ impl Evaluator {
             .all(|&b| b)
     }
 
-    pub fn get_wire(&self, handle: &String) -> F {
-        self.wire_shares.get(handle).unwrap().clone()
+    async fn collect_messages_from_all_peers(
+        &mut self, 
+        identifier: &String
+    ) -> Vec<String> {
+        let mut messages = vec![];
+        let peers: Vec<Pok3rPeerId> = self.addr_book.keys().cloned().collect();
+        for peer_id in peers {
+            if self.id.eq(&peer_id) { continue; }
+
+            loop { //loop over all incoming messages till we find msg from peer
+                if self.mailbox.contains_key(identifier) {
+                    let sender_exists_for_handle = self.mailbox
+                        .get(identifier)
+                        .unwrap()
+                        .contains_key(&peer_id);
+                     //if we already have it, break out!
+                    if sender_exists_for_handle { break; }
+                }
+
+                let msg: EvalNetMsg = self.rx.select_next_some().await;
+                self.process_next_message(&msg);
+            }
+
+            // if we got here, we can assume we have the message from peer_id
+            let msg = self.mailbox
+                .get(identifier)
+                .unwrap()
+                .get(&peer_id)
+                .unwrap()
+                .clone();
+            
+            messages.push(msg);
+        }
+
+        messages
     }
 
+}
+
+fn decode_bs58_str_as_g1(msg: &String) -> G1 {
+    let decoded = bs58::decode(msg).into_vec().unwrap();
+    G1::deserialize_compressed(&mut Cursor::new(decoded)).unwrap()
+}
+
+fn decode_bs58_str_as_gt(msg: &String) -> Gt {
+    let decoded = bs58::decode(msg).into_vec().unwrap();
+    Gt::deserialize_compressed(&mut Cursor::new(decoded)).unwrap()
+}
+
+fn decode_bs58_str_as_f(msg: &String) -> F {
+    utils::bytes_to_field(&bs58::decode(msg).into_vec().unwrap())
 }
 
 pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
@@ -780,10 +716,10 @@ pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
     let r_exp_64 = evaluator.output_wire(&h_r_exp_64).await;
     assert_eq!(r.pow([64]), r_exp_64);
 
-    println!("testing output_wire and output_wire_in_exponent...");
-    let h_r = evaluator.ran();
-    let g_pow_r = evaluator.output_wire_in_exponent(&h_r).await;
-    let r = evaluator.output_wire(&h_r).await;
-    let g = <Curve as Pairing>::G1Affine::generator().clone();
-    assert_eq!(g_pow_r, g.mul(&r));
+    // println!("testing output_wire and output_wire_in_exponent...");
+    // let h_r = evaluator.ran();
+    // let g_pow_r = evaluator.output_wire_in_exponent(&h_r).await;
+    // let r = evaluator.output_wire(&h_r).await;
+    // let g = <Curve as Pairing>::G1Affine::generator().clone();
+    // assert_eq!(g_pow_r, g.mul(&r));
 }

@@ -7,20 +7,10 @@ use serde::{Serialize, Deserialize};
 pub enum EvalNetMsg {
     ConnectionEstablished { success: bool },
     Greeting { message: String },
-    PublishShare { 
+    PublishValue { 
         sender: String,
         handle: String,
-        share: String 
-    },
-    PublishShareInExponent { 
-        sender: String,
-        handle: String,
-        share: String
-    },
-    PublishCommitment { 
-        sender: String,
-        handle: String,
-        commitment: String
+        value: String
     },
     SendTriple { 
         sender: String, 
