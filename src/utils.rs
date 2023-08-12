@@ -55,16 +55,6 @@ pub fn commit_poly(f: &DensePolynomial<F>) -> G1 {
     KZG::commit_g1(&params, f).unwrap()
 }
 
-pub fn field_to_bytes(x: &F) -> Vec<u8> {
-    let mut buffer: Vec<u8> = Vec::new();
-    x.serialize_compressed(&mut buffer).unwrap();
-    buffer
-}
-
-pub fn bytes_to_field(x: &Vec<u8>) -> F {
-    F::deserialize_compressed(x.as_slice()).unwrap()
-}
-
 pub fn compute_additive_shares(value: &F, num_shares: usize) -> Vec<F> {
     let mut sum = F::from(0);
     let mut shares = vec![];

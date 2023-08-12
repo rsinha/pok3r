@@ -373,11 +373,11 @@ impl Evaluator {
                         sender: self.id.clone(),
                         receiver: peer_id.clone(),
                         handle_a: handle_a.clone(),
-                        share_a: bs58::encode(utils::field_to_bytes(&a_i)).into_string(),
+                        share_a: encode_f_as_bs58_str(&a_i),
                         handle_b: handle_b.clone(),
-                        share_b: bs58::encode(utils::field_to_bytes(&b_i)).into_string(),
+                        share_b: encode_f_as_bs58_str(&b_i),
                         handle_c: handle_c.clone(),
-                        share_c: bs58::encode(utils::field_to_bytes(&c_i)).into_string(),
+                        share_c: encode_f_as_bs58_str(&c_i),
                     };
                     send_over_network!(msg, self.tx);
                 } else { // self.id.eq(peer_id)
@@ -411,7 +411,7 @@ impl Evaluator {
         let msg = EvalNetMsg::PublishValue {
             sender: self.id.clone(),
             handle: wire_handle.clone(),
-            value: bs58::encode(utils::field_to_bytes(&my_share)).into_string(),
+            value: encode_f_as_bs58_str(&my_share),
         };
         send_over_network!(msg, self.tx);
 
@@ -443,13 +443,11 @@ impl Evaluator {
         &mut self, value: &G1, 
         identifier: &String
     ) -> G1 {
-        let mut serialized_msg: Vec<u8> = Vec::new();
-        value.serialize_compressed(&mut serialized_msg).unwrap();
-
+        
         let msg = EvalNetMsg::PublishValue {
             sender: self.id.clone(),
             handle: identifier.clone(),
-            value: bs58::encode(serialized_msg).into_string(),
+            value: encode_g1_as_bs58_str(value),
         };
         send_over_network!(msg, self.tx);
 
@@ -581,9 +579,9 @@ impl Evaluator {
                 }
 
                 // insert the received values
-                let a_i = utils::bytes_to_field(&bs58::decode(share_a).into_vec().unwrap());
-                let b_i = utils::bytes_to_field(&bs58::decode(share_b).into_vec().unwrap());
-                let c_i = utils::bytes_to_field(&bs58::decode(share_c).into_vec().unwrap());
+                let a_i = decode_bs58_str_as_f(share_a);
+                let b_i = decode_bs58_str_as_f(share_b);
+                let c_i = decode_bs58_str_as_f(share_c);
                 // store what we received
                 self.wire_shares.insert(handle_a.clone(), a_i);
                 self.wire_shares.insert(handle_b.clone(), b_i);
@@ -666,9 +664,33 @@ impl Evaluator {
 
 }
 
+
+fn encode_f_as_bs58_str(value: &F) -> String {
+    let mut buffer: Vec<u8> = Vec::new();
+    value.serialize_compressed(&mut buffer).unwrap();
+    bs58::encode(buffer).into_string()
+}
+
+fn decode_bs58_str_as_f(msg: &String) -> F {
+    let buf: Vec<u8> = bs58::decode(msg).into_vec().unwrap();
+    F::deserialize_compressed(buf.as_slice()).unwrap()
+}
+
+fn encode_g1_as_bs58_str(value: &G1) -> String {
+    let mut serialized_msg: Vec<u8> = Vec::new();
+    value.serialize_compressed(&mut serialized_msg).unwrap();
+    bs58::encode(serialized_msg).into_string()
+}
+
 fn decode_bs58_str_as_g1(msg: &String) -> G1 {
     let decoded = bs58::decode(msg).into_vec().unwrap();
     G1::deserialize_compressed(&mut Cursor::new(decoded)).unwrap()
+}
+
+fn encode_gt_as_bs58_str(value: &Gt) -> String {
+    let mut serialized_msg: Vec<u8> = Vec::new();
+    value.serialize_compressed(&mut serialized_msg).unwrap();
+    bs58::encode(serialized_msg).into_string()
 }
 
 fn decode_bs58_str_as_gt(msg: &String) -> Gt {
@@ -676,9 +698,7 @@ fn decode_bs58_str_as_gt(msg: &String) -> Gt {
     Gt::deserialize_compressed(&mut Cursor::new(decoded)).unwrap()
 }
 
-fn decode_bs58_str_as_f(msg: &String) -> F {
-    utils::bytes_to_field(&bs58::decode(msg).into_vec().unwrap())
-}
+
 
 pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
     println!("-------------- Running some sanity tests -----------------");
