@@ -454,6 +454,7 @@ impl Evaluator {
         send_over_network!(msg, self.tx);
 
         let incoming_msgs = self.collect_messages_from_all_peers(identifier).await;
+
         let incoming_values: Vec<G1> = incoming_msgs
             .into_iter()
             .map(|x| decode_bs58_str_as_g1(&x))
@@ -657,6 +658,9 @@ impl Evaluator {
             messages.push(msg);
         }
 
+        //clear the mailbox because we might want to use identifier again
+        self.mailbox.remove(identifier);
+
         messages
     }
 
@@ -716,10 +720,10 @@ pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
     let r_exp_64 = evaluator.output_wire(&h_r_exp_64).await;
     assert_eq!(r.pow([64]), r_exp_64);
 
-    // println!("testing output_wire and output_wire_in_exponent...");
-    // let h_r = evaluator.ran();
-    // let g_pow_r = evaluator.output_wire_in_exponent(&h_r).await;
-    // let r = evaluator.output_wire(&h_r).await;
-    // let g = <Curve as Pairing>::G1Affine::generator().clone();
-    // assert_eq!(g_pow_r, g.mul(&r));
+    println!("testing output_wire and output_wire_in_exponent...");
+    let h_r = evaluator.ran();
+    let g_pow_r = evaluator.output_wire_in_exponent(&h_r).await;
+    let r = evaluator.output_wire(&h_r).await;
+    let g = <Curve as Pairing>::G1Affine::generator().clone();
+    assert_eq!(g_pow_r, g.mul(&r));
 }
