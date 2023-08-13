@@ -1,5 +1,5 @@
-use ark_ec::Group;
-use ark_ec::pairing::PairingOutput;
+
+use ark_ec::{Group, pairing::*};
 use ark_std::UniformRand;
 use ark_ff::{Field, /* FftField */ };
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
@@ -11,17 +11,18 @@ use futures::{prelude::*, channel::*};
 use ark_std::io::Cursor;
 //use rand::{rngs::StdRng, SeedableRng};
 use sha2::{Sha256, Digest};
+use num_bigint::BigUint;
 
 use crate::address_book::*;
 use crate::common::*;
 use crate::utils;
 
-type Curve = ark_bls12_377::Bls12_377;
+pub type Curve = ark_bls12_377::Bls12_377;
 //type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 pub type F = ark_bls12_377::Fr;
-type G1 = <Curve as Pairing>::G1Affine;
-type G2 = <Curve as Pairing>::G2Affine;
-type Gt = PairingOutput<Curve>;
+pub type G1 = <Curve as Pairing>::G1Affine;
+pub type G2 = <Curve as Pairing>::G2Affine;
+pub type Gt = PairingOutput<Curve>;
 
 pub enum Gate {
     BEAVER = 1, // denotes a beaver triple source gate that is output by pre-processing
@@ -529,29 +530,6 @@ impl Evaluator {
         self.add_g1_elements_from_all_parties(&sum, func_name).await
     }
 
-    pub async fn ibe_encrypt(&mut self, msg_handle: &String, mask_handle: &String, pk: &G2, hash_id :&G1) -> (G1, Gt) {
-        let msg_share = self.output_wire_in_exponent(msg_handle).await;
-        let mask_share = self.output_wire_in_exponent(mask_handle).await;
-
-        // sample random element
-        let r = self.ran();
-        let h = <Curve as Pairing>::pairing(hash_id, pk);
-
-        let c1 = self.exp_and_reveal_g1(
-            vec![<Curve as Pairing>::G1Affine::generator()], 
-            vec![&r], 
-            &String::from("c1")
-        ).await;
-        
-        let c2 = self.exp_and_reveal_gt(
-            vec![Gt::generator(), h.clone()], 
-            vec![msg_handle, &r], 
-            &String::from("c2")
-        ).await;
-
-        (c1, c2)
-    }
-
     /// returns a^64
     pub async fn exp(&mut self, input_label: &String) -> String {
         let mut tmp = input_label.clone();
@@ -571,6 +549,38 @@ impl Evaluator {
 
     pub fn get_wire(&self, handle: &String) -> F {
         self.wire_shares.get(handle).unwrap().clone()
+    }
+
+    pub async fn dist_ibe_encrypt(
+        &mut self, 
+        msg_share_handle: &String, // [z1]
+        mask_share_handle: &String, // [r]
+        pk: &G2, 
+        id :&[u8]
+    ) -> (G1, Gt) {
+        // let msg_share = self.output_wire_in_exponent(msg_share_handle).await;
+        // let mask_share = self.output_wire_in_exponent(mask_share_handle).await;
+    
+        // TODO: fix this. Need proper hash to curve
+        let x_bigint = BigUint::from_bytes_be(id);
+        let x_f = F::from(x_bigint);
+        let hash_id = G1::generator().mul(x_f);
+
+        let h = <Curve as Pairing>::pairing(hash_id, pk);
+    
+        let c1 = self.exp_and_reveal_g1(
+            vec![<Curve as Pairing>::G1Affine::generator()], 
+            vec![&mask_share_handle], 
+            &String::from("c1")
+        ).await;
+        
+        let c2 = self.exp_and_reveal_gt(
+            vec![Gt::generator(), h.clone()], 
+            vec![msg_share_handle, &mask_share_handle], 
+            &String::from("c2")
+        ).await;
+    
+        (c1, c2)
     }
 
     //returns the handle which 

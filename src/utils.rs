@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+use ark_crypto_primitives::crh::sha256::Sha256;
 use rand::{rngs::StdRng, SeedableRng};
 use ark_ff::{Field, FftField, PrimeField};
 use ark_std::{UniformRand, test_rng, ops::*};
@@ -13,12 +14,24 @@ use ark_poly::{
 };
 use ark_ec::{pairing::Pairing, CurveGroup};
 use ark_serialize::*;
+use ark_ec::{
+    hashing::{
+        curve_maps::wb::WBMap, map_to_curve_hasher::MapToCurveBasedHasher, HashToCurve,
+    },
+    short_weierstrass::{Affine, Projective},
+};
+use ark_ff::{
+    field_hashers::{DefaultFieldHasher, HashToField},
+    One, Zero,
+};
+use num_bigint::{BigInt, BigUint, Sign};
 
 type Curve = ark_bls12_377::Bls12_377;
 type KZG = crate::kzg::KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 type F = ark_bls12_377::Fr;
 type G1 = <Curve as Pairing>::G1Affine;
 type G2 = <Curve as Pairing>::G2Affine;
+type G1Config = ark_ec::short_weierstrass::Affine<ark_bls12_377::g1::Config>;
 
 macro_rules! requires_power_of_2 {
     ($x:expr) => {

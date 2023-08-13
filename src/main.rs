@@ -91,7 +91,8 @@ async fn main() {
 
     mpc.test_networking().await;
     evaluator::perform_sanity_testing(&mut mpc).await;
-    shuffle_deck(&mut mpc).await;
+    let card_shares = shuffle_deck(&mut mpc).await;
+    compute_permutation_argument(&mut mpc, &card_shares).await;
 
     //eval_handle.join().unwrap();
     netd_handle.join().unwrap();
@@ -120,18 +121,19 @@ fn map_roots_of_unity_to_cards() -> HashMap<F, String> {
     output
 }
 
-async fn shuffle_deck(evaluator: &mut Evaluator) {
+async fn shuffle_deck(evaluator: &mut Evaluator) -> Vec<F> {
     println!("-------------- Starting Pok3r shuffle -----------------");
 
     //step 1: parties invoke F_RAN to obtain [sk]
     let sk = evaluator.ran();
 
     //stores (handle, wire value) pairs
-    let mut cards = Vec::new();
+    let mut card_share_handles = Vec::new();
+    let mut card_share_values = Vec::new();
     //stores set of card prfs encountered
     let mut prfs = HashSet::new();
 
-    while cards.len() < 64 { //until you get 64 unique cards
+    while card_share_values.len() < 64 { //until you get 64 unique cards
         let h_r = evaluator.ran();
         let (h_a, h_b, h_c) = evaluator.beaver().await;
 
@@ -150,22 +152,22 @@ async fn shuffle_deck(evaluator: &mut Evaluator) {
         //add card if it hasnt been seen before
         if ! prfs.contains(&y_i) {
             prfs.insert(y_i.clone());
-            cards.push((c_i.clone(), evaluator.get_wire(&c_i)));
+            card_share_handles.push(c_i.clone());
+            card_share_values.push(evaluator.get_wire(&c_i));
         }
     }
 
     let card_mapping = map_roots_of_unity_to_cards();
-    for (h_c, _card_share) in cards {
+    for h_c in card_share_handles {
         let opened_card = evaluator.output_wire(&h_c).await;
         println!("{}", card_mapping.get(&opened_card).unwrap());
     }
 
     println!("-------------- Ending Pok3r shuffle -----------------");
-
+    return card_share_values;
 }
 
-
-async fn _compute_permutation_argument(
+async fn compute_permutation_argument(
     evaluator: &mut Evaluator,
     card_shares: &Vec<F>
 ) {
