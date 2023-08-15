@@ -1,5 +1,8 @@
 
 use ark_ec::{Group, pairing::*};
+use ark_poly::DenseUVPolynomial;
+use ark_poly::univariate::DenseOrSparsePolynomial;
+use ark_poly::univariate::DensePolynomial;
 use ark_std::UniformRand;
 use ark_ff::{Field, /* FftField */ };
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
@@ -31,6 +34,8 @@ pub enum Gate {
     MULT = 4, // denotes a multiplier over 2 input wires
     INV = 5, // denotes an inversion gate
     EXP = 6, // denotes an exponentiation (by 64) gate
+    SCALE = 7, // denotes a scaling gate
+    CLEAR_ADD = 8, // denotes a addition gate for one input in clear and another shared
     //OUTPUT = 5 // denotes an output gate that all parties observe in the clear
 }
 
@@ -77,6 +82,30 @@ fn compute_ran_input_wire_id(gate_id: u64) -> String {
     //gate_id denotes a unique identifier for this gate
     let mut hasher_input = Vec::new();
     hasher_input.extend_from_slice(&(Gate::RAN as u64).to_be_bytes());
+    hasher_input.extend_from_slice(&gate_id.to_be_bytes());
+
+    let mut hasher = Sha256::new();
+    hasher.update(&hasher_input);
+    let hash = hasher.finalize();
+
+    bs58::encode(hash).into_string()
+}
+
+fn compute_scale_wire_id(gate_id: u64) -> String {
+    let mut hasher_input = Vec::new();
+    hasher_input.extend_from_slice(&(Gate::SCALE as u64).to_be_bytes());
+    hasher_input.extend_from_slice(&gate_id.to_be_bytes());
+
+    let mut hasher = Sha256::new();
+    hasher.update(&hasher_input);
+    let hash = hasher.finalize();
+
+    bs58::encode(hash).into_string()
+}
+
+fn compute_clear_add_wire_id(gate_id: u64) -> String {
+    let mut hasher_input = Vec::new();
+    hasher_input.extend_from_slice(&(Gate::CLEAR_ADD as u64).to_be_bytes());
     hasher_input.extend_from_slice(&gate_id.to_be_bytes());
 
     let mut hasher = Sha256::new();
@@ -136,7 +165,9 @@ macro_rules! send_over_network {
 
 pub struct GateCount {
     num_beaver: u64,
-    num_ran: u64
+    num_ran: u64,
+    num_scale: u64,
+    num_clear_add: u64
 }
 
 pub struct Evaluator {
@@ -187,7 +218,7 @@ impl Evaluator {
             rx,
             wire_shares: HashMap::new(),
             mailbox: HashMap::new(),
-            gate_counters: GateCount { num_beaver: 0, num_ran: 0 }
+            gate_counters: GateCount { num_beaver: 0, num_ran: 0, num_scale: 0, num_clear_add: 0 }
         }
     }
 
@@ -281,6 +312,40 @@ impl Evaluator {
         let wire_out = q_inv * self.get_wire(handle_r);
 
         self.wire_shares.insert(handle_out.clone(), wire_out);
+
+        handle_out
+    }
+
+    // Adds [x] to y in the clear and outputs handle to the resulting share
+    pub fn clear_add(&mut self,
+        handle_x: &String,
+        y: F
+    ) -> String {
+        let gate_id = self.gate_counters.num_clear_add;
+        self.gate_counters.num_clear_add += 1;
+
+        let handle_out = compute_clear_add_wire_id(gate_id);
+
+        let x = self.get_wire(&handle_x);
+
+        self.wire_shares.insert(handle_out.clone(), x + y);
+
+        handle_out
+    }
+
+    // Scales [x] by scalar and outputs handle to the resulting share
+    pub fn scale(&mut self, 
+        handle_in: &String, 
+        scalar: F
+    ) -> String {
+        let gate_id = self.gate_counters.num_scale;
+        self.gate_counters.num_scale += 1;
+
+        let handle_out = compute_scale_wire_id(gate_id);
+
+        let x = self.get_wire(&handle_in);
+
+        self.wire_shares.insert(handle_out.clone(), x * scalar);
 
         handle_out
     }
@@ -549,6 +614,79 @@ impl Evaluator {
 
     pub fn get_wire(&self, handle: &String) -> F {
         self.wire_shares.get(handle).unwrap().clone()
+    }
+
+    pub async fn eval_proof(&mut self, f_handles: Vec<&String>, z: F) -> G1 {
+        // get shares
+        let f_shares = f_handles
+            .iter()
+            .map(|h| self.get_wire(h))
+            .collect::<Vec<F>>();
+
+        // Compute f_polynomial
+        let f_name = String::from("pi");
+        let f_poly = utils::interpolate_poly_over_mult_subgroup(&f_shares);
+
+        let divisor = DensePolynomial::from_coefficients_vec(vec![F::from(1), -z]);
+
+        // Divide by (X-z)
+        let (quotient, _remainder) = 
+            DenseOrSparsePolynomial::divide_with_q_and_r(
+                &(&f_poly).into(),
+                &(&divisor).into(),
+            ).unwrap();
+
+        let pi_poly = utils::commit_poly(&quotient);
+        let pi = self.add_g1_elements_from_all_parties(&pi_poly, &f_name).await;
+
+        pi
+    }
+
+    pub async fn dist_sigma_proof(
+        &mut self,
+        base_1: &G1,
+        base_2: &G1,
+        base_3: &Gt,
+        wit_1_handles: Vec<&String>,
+        wit_2_handle: &String,
+        lin_comb_ran: Vec<F>
+    ) -> (G1, G1, Gt, F, F) {
+        // Message 1
+        let z2 = self.ran();
+        let a1 = self.exp_and_reveal_g1(
+            vec![base_1.clone()], 
+            vec![&z2.clone()], 
+            &String::from("a1")
+        ).await;
+        let a2 = self.exp_and_reveal_g1(
+            vec![base_2.clone()], 
+            vec![&z2.clone()], 
+            &String::from("a2")
+        ).await;
+        let a3 = self.exp_and_reveal_gt(
+            vec![base_3.clone()], 
+            vec![&z2.clone()], 
+            &String::from("a3")
+        ).await;
+
+        // FS Hash
+        let gamma = F::rand(&mut rand::thread_rng());
+
+        // Message 3
+        let mut h_y = self.scale(wit_2_handle, gamma);
+        h_y = self.add(&h_y,&z2);
+        let y = self.output_wire(&h_y).await;
+
+        let mut h_x = self.clear_add(&z2, F::from(0));
+
+        for i in 0..52 {
+            let tmp = self.scale(&wit_1_handles[i], lin_comb_ran[i]);
+            h_x = self.add(&tmp, &h_x);
+        }
+        h_x = self.scale(&h_x, gamma);
+        let x = self.output_wire(&h_x).await;
+        
+        (a1,a2,a3,x,y)
     }
 
     pub async fn dist_ibe_encrypt(

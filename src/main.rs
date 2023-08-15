@@ -1,8 +1,11 @@
-use std::{thread, collections::{HashMap, HashSet}, time::Duration};
+use std::{thread, collections::{HashMap, HashSet}, time::Duration, vec, ops::*};
+use ark_ec::{CurveGroup, AffineRepr, pairing::Pairing};
+use ark_std::{UniformRand, Zero};
 use async_std::task;
 //use std::sync::mpsc;
 use futures::channel::*;
 use clap::Parser;
+use num_bigint::BigUint;
 use serde_json::json;
 
 mod network;
@@ -224,3 +227,104 @@ async fn compute_permutation_argument(
 
 }
 
+async fn encrypt_and_prove(
+    evaluator: &mut Evaluator,
+    card_handles: Vec<&String>,
+    card_commitment: G1,
+    pk: &G2,
+    ids: Vec<&[u8]>
+) {
+    // Get all cards from card handles
+    let mut cards = vec![];
+    for h in card_handles.clone() {
+        cards.push(evaluator.output_wire(h).await);
+    }
+
+    // Sample common randomness for encryption
+    let r = evaluator.ran();
+
+    let mut z_is = vec![]; //vector of (handle, share_value) pairs
+    let mut D_is = vec![]; //vector of scaled commitments 
+    let mut v_is = vec![]; //vector of (handle, share_value) pairs
+    let mut pi_is = vec![]; //vector of evaluation proofs
+
+    let mut c1_is = vec![]; //vector of ciphertexts
+    let mut c2_is = vec![]; //vector of ciphertexts
+
+    // Compute shares of plain quotient polynomial commitment
+    let mut pi_plain_vec = vec![]; //vector of plain non-reconstructed evaluation proofs
+    let w = utils::multiplicative_subgroup_of_size(64);
+
+    for i in 0..51 {
+        let z = utils::compute_power(&w, i);
+        let pi_plain_i = evaluator.eval_proof(card_handles.clone(), z).await;
+        pi_plain_vec.push(pi_plain_i);
+    }
+    
+
+    for i in 0..51 {
+        let (h_a, h_b, h_c) = evaluator.beaver().await;
+
+        // Sample mask to be encrypted
+        let z_i = evaluator.ran();
+        z_is.push((z_i.clone(), evaluator.get_wire(&z_i)));
+
+        // Encrypt the mask to id_i
+        let (c1_i, c2_i) = 
+            evaluator.dist_ibe_encrypt(&card_handles[i], &r, pk, &ids[i]).await;
+        c1_is.push(c1_i);
+        c2_is.push(c2_i); 
+
+        // Compute D_i = C_i^z_i
+        let D_i = 
+            evaluator.exp_and_reveal_g1(vec![card_commitment], vec![&z_i], &format!("{}/{}", "D_", i)).await;
+        D_is.push(D_i.clone());
+
+        // Compute v_i = z_i * card_i
+        let v_i = evaluator.mult(&z_i, &card_handles[i], (&h_a, &h_b, &h_c)).await;        
+        v_is.push((v_i.clone(), evaluator.get_wire(&v_i)));
+
+        // TODO: batch this
+        // Evaluation proofs of D_i at \omega^i to v_i 
+        // Currently computed by raising the plain eval proof shares to the power z_i and then reconstructing the group elements
+
+        let pi_i_share = pi_plain_vec[i].clone().mul(z_is[i].1).into_affine();
+        let pi_i = 
+            evaluator.add_g1_elements_from_all_parties(&pi_i_share, &format!("{}/{}", "pi_", i)).await;
+        pi_is.push(pi_i);
+
+    }
+
+    // Hash to obtain randomness for batching
+    // Jank solution for now
+    let mut s = vec![];
+
+    for _ in 0..51 {
+        s.push(F::rand(&mut rand::thread_rng()));
+    }
+
+    // Compute batched pairing base for sigma proof
+    let mut e_batch = Gt::zero();
+
+    for i in 0..51 {
+        // TODO: fix this. Need proper hash to curve
+        let x_bigint = BigUint::from_bytes_be(ids[i]);
+        let x_f = F::from(x_bigint);
+        let hash_id = G1::generator().mul(x_f);
+
+        let h = <Curve as Pairing>::pairing(hash_id, pk);
+
+        let e_batch = e_batch + h.mul(s[i]);
+    }
+
+    let (a1,a2,a3,x,y) = 
+        evaluator.dist_sigma_proof(
+            &card_commitment,
+            &G1::generator(),
+            &e_batch,
+            z_is.iter().map(|(h, _)| h).collect(),
+            &r,
+            s).await;
+
+
+}
