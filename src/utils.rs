@@ -90,6 +90,13 @@ pub fn compute_power(x: &F, n: u64) -> F {
     x.pow([n])
 }
 
+pub fn fs_hash(x: Vec<&[u8]>, num_output: usize) -> Vec<F> {
+    let hasher = <DefaultFieldHasher<Sha256> as HashToField<F>>::new(b"pok3r");
+    let field_elements = hasher.hash_to_field(&x.concat(), num_output);
+
+    field_elements
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

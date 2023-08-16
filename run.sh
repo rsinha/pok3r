@@ -1,4 +1,4 @@
-ps -a | grep pok3r | grep -v grep | awk '{print "kill -9 " $1}' | sh
+ps aux | grep pok3r | grep -v grep | awk '{print "kill -9 " $2}' | sh
 rm -f /tmp/pok3r.log
 
 target/debug/pok3r --seed 1 --id 12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X >> /tmp/pok3r.log &

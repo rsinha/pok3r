@@ -317,8 +317,14 @@ async fn encrypt_and_prove(
         let e_batch = e_batch + h.mul(s[i]);
     }
 
-    let (a1,a2,a3,x,y) = 
-        evaluator.dist_sigma_proof(
+    let (
+        a1,
+        a2,
+        a3,
+        a4,
+        x,
+        y
+    ) = evaluator.dist_sigma_proof(
             &card_commitment,
             &G1::generator(),
             &e_batch,
