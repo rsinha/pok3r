@@ -328,7 +328,13 @@ impl Evaluator {
 
         let x = self.get_wire(&handle_x);
 
-        self.wire_shares.insert(handle_out.clone(), x + y);
+        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
+        let clear_add_share: F = match my_id {
+            0 => {x + y}
+            _ => {x}
+        };
+
+        self.wire_shares.insert(handle_out.clone(), clear_add_share);
 
         handle_out
     }
