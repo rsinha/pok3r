@@ -1005,9 +1005,9 @@ pub async fn test_sigma(evaluator: &mut Evaluator) {
     let mut lin_comb_ran = vec![];
     let wit_2_handle = evaluator.ran();
 
-    for i in 0..52 {
+    for _ in 0..52 {
         wit_1_handles.push(evaluator.ran());
-        lin_comb_ran.push(F::from(5325*i));
+        lin_comb_ran.push(F::rand(&mut ark_std::test_rng()));
     }
 
     let mut d_i = vec![];

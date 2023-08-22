@@ -229,13 +229,13 @@ async fn compute_permutation_argument(
 
 }
 
-async fn encrypt_and_prove(
-    evaluator: &mut Evaluator,
-    card_handles: Vec<&String>,
+async fn encrypt_and_prove<'a>(
+    evaluator: &'a mut Evaluator,
+    card_handles: Vec<&'a String>,
     card_commitment: G1,
-    pk: &G2,
-    ids: Vec<&[u8]>
-) {
+    pk: &'a G2,
+    ids: Vec<&'a [u8]>
+) -> EncryptProof<'a> {
     // Get all cards from card handles
     let mut cards = vec![];
     for h in card_handles.clone() {
@@ -258,14 +258,14 @@ async fn encrypt_and_prove(
     let mut pi_plain_vec = vec![]; //vector of plain non-reconstructed evaluation proofs
     let w = utils::multiplicative_subgroup_of_size(64);
 
-    for i in 0..51 {
+    for i in 0..52 {
         let z = utils::compute_power(&w, i);
         let pi_plain_i = evaluator.eval_proof(card_handles.clone(), z).await;
         pi_plain_vec.push(pi_plain_i);
     }
     
 
-    for i in 0..51 {
+    for i in 0..52 {
         let (h_a, h_b, h_c) = evaluator.beaver().await;
 
         // Sample mask to be encrypted
@@ -303,14 +303,14 @@ async fn encrypt_and_prove(
     // Jank solution for now
     let mut s = vec![];
 
-    for _ in 0..51 {
-        s.push(F::rand(&mut rand::thread_rng()));
+    for i in 0..52 {
+        s.push(F::from(42*i));
     }
 
     // Compute batched pairing base for sigma proof
     let mut e_batch = Gt::zero();
 
-    for i in 0..51 {
+    for i in 0..52 {
         // TODO: fix this. Need proper hash to curve
         let x_bigint = BigUint::from_bytes_be(ids[i]);
         let x_f = F::from(x_bigint);
@@ -318,12 +318,12 @@ async fn encrypt_and_prove(
 
         let h = <Curve as Pairing>::pairing(hash_id, pk);
 
-        let e_batch = e_batch + h.mul(s[i]);
+        e_batch = e_batch.add(h.mul(s[i]));
     }
 
     let mut wit_1 = vec![];
     
-    for i in 0..51 {
+    for i in 0..52 {
         wit_1.push(z_is[i].clone().0);
     }
 
@@ -335,14 +335,71 @@ async fn encrypt_and_prove(
             r,
             s).await;
 
-
+    EncryptProof {
+        pk: pk.clone(),
+        ids: ids,
+        card_commitment: card_commitment,
+        masked_commitments: D_is,
+        masked_evals: v_is_reconstructed,
+        eval_proofs: pi_is,
+        ciphertexts: c1_is.into_iter().zip(c2_is.into_iter()).collect(),
+        sigma_proof: proof,
+    }
 }
 
 async fn local_verify_encrption_proof(
     evaluator: &mut Evaluator,
     proof: &EncryptProof<'_>,
 ) -> bool {
-    
+    // Check that all ciphertexts share the same randomness
+    let c1 = proof.ciphertexts[0].0.clone();
+    for i in 1..52 {
+        if proof.ciphertexts[i].0 != c1 {
+            return false;
+        }
+    }
+
+    // Check the sigma proof
+
+    // Hash to obtain randomness for batching
+    // Jank solution for now
+    let mut s = vec![];
+
+    for i in 0..52 {
+        s.push(F::from(42*i));
+    }
+
+    // Compute e_batch
+    let mut e_batch = Gt::zero();
+
+    for i in 0..52 {
+        let x_bigint = BigUint::from_bytes_be(proof.ids[i]);
+        let x_f = F::from(x_bigint);
+        let hash_id = G1::generator().mul(x_f);
+
+        let h = <Curve as Pairing>::pairing(hash_id, &proof.pk);
+
+        e_batch = e_batch.add(h.mul(s[i]));
+    }
+
+    // Compute D_batch
+    let mut D_batch = G1::zero();
+
+    for i in 0..52 {
+        D_batch = D_batch.add(proof.masked_commitments[i].mul(s[i])).into_affine();
+    }
+
+    // Compute c2_batch
+    let mut c2_batch = Gt::zero();
+
+    for i in 0..52 {
+        c2_batch = c2_batch.add(proof.ciphertexts[i].1.clone());
+    }    
+
+    // Verify sigma proof
+    if evaluator.local_verify_sigma_proof(&proof.card_commitment, &D_batch, &G1::generator(), &c1, &e_batch, &c2_batch, &proof.sigma_proof) == false {
+        return false;
+    }
 
     true
 }
