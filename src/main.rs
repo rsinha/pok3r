@@ -95,7 +95,9 @@ async fn main() {
     mpc.test_networking().await;
     evaluator::perform_sanity_testing(&mut mpc).await;
     let card_shares = shuffle_deck(&mut mpc).await;
-    compute_permutation_argument(&mut mpc, &card_shares).await;
+    // compute_permutation_argument(&mut mpc, &card_shares).await;
+
+    evaluator::test_sigma(&mut mpc).await;
 
     //eval_handle.join().unwrap();
     netd_handle.join().unwrap();
@@ -246,6 +248,7 @@ async fn encrypt_and_prove(
     let mut z_is = vec![]; //vector of (handle, share_value) pairs
     let mut D_is = vec![]; //vector of scaled commitments 
     let mut v_is = vec![]; //vector of (handle, share_value) pairs
+    let mut v_is_reconstructed = vec![]; //vector of reconstructed v_i values
     let mut pi_is = vec![]; //vector of evaluation proofs
 
     let mut c1_is = vec![]; //vector of ciphertexts
@@ -277,12 +280,13 @@ async fn encrypt_and_prove(
 
         // Compute D_i = C_i^z_i
         let D_i = 
-            evaluator.exp_and_reveal_g1(vec![card_commitment], vec![&z_i], &format!("{}/{}", "D_", i)).await;
+            evaluator.exp_and_reveal_g1(vec![card_commitment], vec![z_i.clone()], &format!("{}/{}", "D_", i)).await;
         D_is.push(D_i.clone());
 
         // Compute v_i = z_i * card_i
         let v_i = evaluator.mult(&z_i, &card_handles[i], (&h_a, &h_b, &h_c)).await;        
         v_is.push((v_i.clone(), evaluator.get_wire(&v_i)));
+        v_is_reconstructed.push(evaluator.output_wire(&v_i).await);
 
         // TODO: batch this
         // Evaluation proofs of D_i at \omega^i to v_i 
@@ -317,20 +321,28 @@ async fn encrypt_and_prove(
         let e_batch = e_batch + h.mul(s[i]);
     }
 
-    let (
-        a1,
-        a2,
-        a3,
-        a4,
-        x,
-        y
-    ) = evaluator.dist_sigma_proof(
+    let mut wit_1 = vec![];
+    
+    for i in 0..51 {
+        wit_1.push(z_is[i].clone().0);
+    }
+
+    let proof = evaluator.dist_sigma_proof(
             &card_commitment,
             &G1::generator(),
             &e_batch,
-            z_is.iter().map(|(h, _)| h).collect(),
-            &r,
+            wit_1,
+            r,
             s).await;
 
 
+}
+
+async fn local_verify_encrption_proof(
+    evaluator: &mut Evaluator,
+    proof: &EncryptProof<'_>,
+) -> bool {
+    
+
+    true
 }
