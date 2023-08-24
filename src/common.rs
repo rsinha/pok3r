@@ -1,3 +1,4 @@
+use ark_serialize::CanonicalSerialize;
 use serde::{Serialize, Deserialize};
 use crate::evaluator::*;
 
@@ -35,7 +36,56 @@ pub struct EncryptProof<'a> {
     pub masked_evals: Vec<F>,
     pub eval_proofs: Vec<G1>,
     pub ciphertexts: Vec<(G1,Gt)>,
-    pub sigma_proof: SigmaProof,
+    pub sigma_proof: Option<SigmaProof>,
+}
+
+impl <'a> EncryptProof<'a> {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        let mut pk_bytes = Vec::new();
+        self.pk.serialize_uncompressed(&mut pk_bytes).unwrap();
+        bytes.extend_from_slice(&pk_bytes);
+
+        for id in &self.ids {
+            bytes.extend_from_slice(&(id.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(id);
+        }
+
+        let mut card_commitment_bytes = Vec::new();
+        self.card_commitment.serialize_uncompressed(&mut card_commitment_bytes).unwrap();
+        bytes.extend_from_slice(&card_commitment_bytes);
+
+        for masked_commitment in &self.masked_commitments {
+            let mut masked_commitment_bytes = Vec::new();
+            masked_commitment.serialize_uncompressed(&mut masked_commitment_bytes).unwrap();
+            bytes.extend_from_slice(&masked_commitment_bytes);
+        }
+
+        for masked_eval in &self.masked_evals {
+            let mut masked_eval_bytes = Vec::new();
+            masked_eval.serialize_uncompressed(&mut masked_eval_bytes).unwrap();
+            bytes.extend_from_slice(&masked_eval_bytes);
+        }
+
+        for eval_proof in &self.eval_proofs {
+            let mut eval_proof_bytes = Vec::new();
+            eval_proof.serialize_uncompressed(&mut eval_proof_bytes).unwrap();
+            bytes.extend_from_slice(&eval_proof_bytes);
+        }
+
+        for (ciphertext1, ciphertext2) in &self.ciphertexts {
+            let mut ciphertext1_bytes = Vec::new();
+            ciphertext1.serialize_uncompressed(&mut ciphertext1_bytes).unwrap();
+            bytes.extend_from_slice(&ciphertext1_bytes);
+
+            let mut ciphertext2_bytes = Vec::new();
+            ciphertext2.serialize_uncompressed(&mut ciphertext2_bytes).unwrap();
+            bytes.extend_from_slice(&ciphertext2_bytes);
+        }
+
+        bytes
+    }
 }
 
 /// SigmaProof is a structure for the sigma protocol proof

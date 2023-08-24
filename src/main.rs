@@ -1,6 +1,6 @@
 use std::{thread, collections::{HashMap, HashSet}, time::Duration, vec, ops::*};
 use ark_ec::{CurveGroup, AffineRepr, pairing::Pairing};
-use ark_std::{UniformRand, Zero};
+use ark_std::Zero;
 use async_std::task;
 //use std::sync::mpsc;
 use futures::channel::*;
@@ -246,7 +246,7 @@ async fn encrypt_and_prove<'a>(
     let r = evaluator.ran();
 
     let mut z_is = vec![]; //vector of (handle, share_value) pairs
-    let mut D_is = vec![]; //vector of scaled commitments 
+    let mut d_is = vec![]; //vector of scaled commitments 
     let mut v_is = vec![]; //vector of (handle, share_value) pairs
     let mut v_is_reconstructed = vec![]; //vector of reconstructed v_i values
     let mut pi_is = vec![]; //vector of evaluation proofs
@@ -278,10 +278,10 @@ async fn encrypt_and_prove<'a>(
         c1_is.push(c1_i);
         c2_is.push(c2_i); 
 
-        // Compute D_i = C_i^z_i
-        let D_i = 
+        // Compute d_i = C_i^z_i
+        let d_i = 
             evaluator.exp_and_reveal_g1(vec![card_commitment], vec![z_i.clone()], &format!("{}/{}", "D_", i)).await;
-        D_is.push(D_i.clone());
+        d_is.push(d_i.clone());
 
         // Compute v_i = z_i * card_i
         let v_i = evaluator.mult(&z_i, &card_handles[i], (&h_a, &h_b, &h_c)).await;        
@@ -289,7 +289,7 @@ async fn encrypt_and_prove<'a>(
         v_is_reconstructed.push(evaluator.output_wire(&v_i).await);
 
         // TODO: batch this
-        // Evaluation proofs of D_i at \omega^i to v_i 
+        // Evaluation proofs of d_i at \omega^i to v_i 
         // Currently computed by raising the plain eval proof shares to the power z_i and then reconstructing the group elements
 
         let pi_i_share = pi_plain_vec[i].clone().mul(z_is[i].1).into_affine();
@@ -300,12 +300,24 @@ async fn encrypt_and_prove<'a>(
     }
 
     // Hash to obtain randomness for batching
-    // Jank solution for now
-    let mut s = vec![];
 
-    for i in 0..52 {
-        s.push(F::from(42*i));
-    }
+    let tmp_proof = EncryptProof{
+        pk: pk.clone(),
+        ids: ids.clone(),
+        card_commitment: card_commitment.clone(),
+        masked_commitments: d_is.clone(),
+        masked_evals: v_is_reconstructed.clone(),
+        eval_proofs: pi_is.clone(),
+        ciphertexts: c1_is.clone().into_iter().zip(c2_is.clone().into_iter()).collect(),
+        sigma_proof: None,
+    };
+
+    // Jank solution for now
+    let s = utils::fs_hash(vec![&tmp_proof.to_bytes()], 52);
+
+    // for i in 0..52 {
+    //     s.push(F::from(42*i));
+    // }
 
     // Compute batched pairing base for sigma proof
     let mut e_batch = Gt::zero();
@@ -339,11 +351,11 @@ async fn encrypt_and_prove<'a>(
         pk: pk.clone(),
         ids: ids,
         card_commitment: card_commitment,
-        masked_commitments: D_is,
+        masked_commitments: d_is,
         masked_evals: v_is_reconstructed,
         eval_proofs: pi_is,
         ciphertexts: c1_is.into_iter().zip(c2_is.into_iter()).collect(),
-        sigma_proof: proof,
+        sigma_proof: Some(proof),
     }
 }
 
@@ -362,12 +374,14 @@ async fn local_verify_encrption_proof(
     // Check the sigma proof
 
     // Hash to obtain randomness for batching
-    // Jank solution for now
-    let mut s = vec![];
+    let s = utils::fs_hash(vec![&proof.to_bytes()], 52);
 
-    for i in 0..52 {
-        s.push(F::from(42*i));
-    }
+    // // Jank solution for now
+    // let mut s = vec![];
+
+    // for i in 0..52 {
+    //     s.push(F::from(42*i));
+    // }
 
     // Compute e_batch
     let mut e_batch = Gt::zero();
@@ -382,11 +396,11 @@ async fn local_verify_encrption_proof(
         e_batch = e_batch.add(h.mul(s[i]));
     }
 
-    // Compute D_batch
-    let mut D_batch = G1::zero();
+    // Compute d_batch
+    let mut d_batch = G1::zero();
 
     for i in 0..52 {
-        D_batch = D_batch.add(proof.masked_commitments[i].mul(s[i])).into_affine();
+        d_batch = d_batch.add(proof.masked_commitments[i].mul(s[i])).into_affine();
     }
 
     // Compute c2_batch
@@ -397,7 +411,14 @@ async fn local_verify_encrption_proof(
     }    
 
     // Verify sigma proof
-    if evaluator.local_verify_sigma_proof(&proof.card_commitment, &D_batch, &G1::generator(), &c1, &e_batch, &c2_batch, &proof.sigma_proof) == false {
+    if evaluator.local_verify_sigma_proof(
+        &proof.card_commitment, 
+        &d_batch, 
+        &G1::generator(), 
+        &c1, 
+        &e_batch, 
+        &c2_batch, 
+        proof.sigma_proof.as_ref().unwrap()) == false {
         return false;
     }
 
