@@ -312,12 +312,7 @@ async fn encrypt_and_prove<'a>(
         sigma_proof: None,
     };
 
-    // Jank solution for now
     let s = utils::fs_hash(vec![&tmp_proof.to_bytes()], 52);
-
-    // for i in 0..52 {
-    //     s.push(F::from(42*i));
-    // }
 
     // Compute batched pairing base for sigma proof
     let mut e_batch = Gt::zero();
@@ -375,13 +370,6 @@ async fn local_verify_encrption_proof(
 
     // Hash to obtain randomness for batching
     let s = utils::fs_hash(vec![&proof.to_bytes()], 52);
-
-    // // Jank solution for now
-    // let mut s = vec![];
-
-    // for i in 0..52 {
-    //     s.push(F::from(42*i));
-    // }
 
     // Compute e_batch
     let mut e_batch = Gt::zero();
