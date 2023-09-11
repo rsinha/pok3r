@@ -1,6 +1,8 @@
 use std::{thread, collections::{HashMap, HashSet}, time::Duration, vec, ops::*};
 use ark_ec::{CurveGroup, AffineRepr, pairing::Pairing};
-use ark_std::Zero;
+use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
+use ark_serialize::CanonicalSerialize;
+use ark_std::{Zero, One};
 use async_std::task;
 //use std::sync::mpsc;
 use futures::channel::*;
@@ -126,7 +128,7 @@ fn map_roots_of_unity_to_cards() -> HashMap<F, String> {
     output
 }
 
-async fn shuffle_deck(evaluator: &mut Evaluator) -> Vec<F> {
+async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     println!("-------------- Starting Pok3r shuffle -----------------");
 
     //step 1: parties invoke F_RAN to obtain [sk]
@@ -163,17 +165,18 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> Vec<F> {
     }
 
     let card_mapping = map_roots_of_unity_to_cards();
-    for h_c in card_share_handles {
+    for h_c in &card_share_handles {
         let opened_card = evaluator.output_wire(&h_c).await;
         println!("{}", card_mapping.get(&opened_card).unwrap());
     }
 
     println!("-------------- Ending Pok3r shuffle -----------------");
-    return card_share_values;
+    return (card_share_handles.clone(), card_share_values);
 }
 
 async fn compute_permutation_argument(
     evaluator: &mut Evaluator,
+    card_share_handles: Vec<String>,
     card_shares: &Vec<F>
 ) {
     let mut r_is = vec![]; //vector of (handle, share_value) pairs
@@ -223,8 +226,108 @@ async fn compute_permutation_argument(
     let v = utils::interpolate_poly_over_mult_subgroup(&v_evals);
     let v_com = utils::commit_poly(&v);
 
-    //let γ1 = fiat_shamir_hash(f_com, v_com);
+    // Hash v_com and f_com to obtain randomness for batching
+    let mut v_bytes = Vec::new();
+    let mut f_bytes = Vec::new();
 
+    v_com.serialize_uncompressed(&mut v_bytes).unwrap();
+    f_com.serialize_uncompressed(&mut f_bytes).unwrap();
+
+    let y1 = utils::fs_hash(vec![&v_bytes, &f_bytes], 1)[0];
+
+    // Locally compute g(X) shares from f(X) shares
+    let mut g_shares = vec![];
+    let mut h_g_shares = vec![];
+    for i in 0..52 {
+        let f_i = f_share.coeffs[i];
+        let g_i = f_i + y1;
+        g_shares.push(g_i);
+
+        h_g_shares[i] = evaluator.clear_add(&card_share_handles[i], y1);
+    }
+
+    let g_share_poly = DensePolynomial::from_coefficients_vec(g_shares.clone());
+
+    // Commit to g(X)
+    let g_share_com = utils::commit_poly(&g_share_poly);
+    let g_com = evaluator.add_g1_elements_from_all_parties(&g_share_com, &String::from("g")).await;
+
+    // Compute h(X) = v(X) + y1
+    let mut h_vals = vec![];
+    for i in 0..52 {
+        let v_i = v.coeffs[i];
+        let h_i = v_i + y1;
+        h_vals.push(h_i);
+    }
+
+    // Compute s_i' and t_i'
+    let mut t_prime_is = vec![];
+
+    for i in 0..52 {
+        let (h_a, h_b, h_c) = evaluator.beaver().await;
+
+        let h_r_i = &r_is.get(i).unwrap().0;
+        let h_r_inv_i_plus_1 = &r_inv_is.get(i+1).unwrap().0;
+        
+        // Get a handle for g_i and scale with h_i^inv
+        let h_g_i = &h_g_shares[i];
+        let h_h_inv_g_i = &evaluator.scale(h_g_i, h_vals[i]);
+
+        let s_prime_i = evaluator.mult(
+            h_r_i,
+            h_h_inv_g_i,
+            (&h_a, &h_b, &h_c)
+        ).await;
+
+        let t_prime_i = evaluator.mult(
+            h_r_inv_i_plus_1,
+            &s_prime_i,
+            (&h_a, &h_b, &h_c)
+        ).await;
+
+        let t_prime_i = evaluator.output_wire(&t_prime_i).await;
+        t_prime_is.push(t_prime_i);
+    }
+
+    // Locally compute t_i
+    let mut t_is = vec![];
+    for i in 0..52 {
+        // let tmp = product of t'_i from 0 to i
+        let mut tmp = F::one();
+        for j in 0..i {
+            tmp = tmp * t_prime_is[j];
+        }
+
+        let t_i = evaluator.scale(&b_is[i].0, tmp);       
+
+        t_is.push((t_i.clone(), evaluator.get_wire(&t_i)));
+    }
+
+    // Commit to t(X)
+    let t_shares : Vec<F> = t_is.clone().into_iter().map(|x| x.1).collect();
+    let t_share_poly = DensePolynomial::from_coefficients_vec(t_shares.clone());
+    let t_share_com = utils::commit_poly(&t_share_poly);
+    let t_com = evaluator.add_g1_elements_from_all_parties(&t_share_com, &String::from("t")).await;
+
+    // Compute d_i
+    let mut d_is = vec![];
+
+    for i in 0..52 {
+        let (h_a, h_b, h_c) = evaluator.beaver().await;
+
+        // alpha_i = t_i * g_i-1
+        let alpha_i = evaluator.mult(
+            &t_is[i].0,
+            &h_g_shares[i],
+            (&h_a, &h_b, &h_c)
+        ).await;
+
+        // d_i = h_i-1 * t_i-1 - alpha_i
+        let tmp = evaluator.scale(&t_is[i].0, -h_vals[i]);
+        let minus_d_i = evaluator.add(&tmp, &alpha_i);
+
+        d_is.push(- evaluator.get_wire(&minus_d_i));
+    }
 
 
 }
