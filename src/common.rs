@@ -26,6 +26,25 @@ pub enum EvalNetMsg {
     },
 }
 
+/// PermutationProof is a structure for the permutation proofs
+pub struct PermutationProof {
+    pub y1: F,
+    pub y2: F,
+    pub y3: F,
+    pub y4: F,
+    pub y5: F,
+    pub pi_1: G1,
+    pub pi_2: G1,
+    pub pi_3: G1,
+    pub pi_4: G1,
+    pub pi_5: G1,
+    pub v_com: G1,
+    pub f_com: G1,
+    pub q_com: G1,
+    pub t_com: G1,
+    pub g_com: G1
+}
+
 /// EncryptProof is a structure for the encryptions and attached proofs
 /// produced by encrypt_and_prove and verified by local_verify_encryption_proof
 pub struct EncryptProof<'a> {

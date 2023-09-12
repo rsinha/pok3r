@@ -7,7 +7,7 @@ use ark_std::UniformRand;
 use ark_ff::{Field, /* FftField */ };
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
 use ark_ec::{pairing::Pairing, CurveGroup, AffineRepr};
-use ark_std::Zero;
+use ark_std::{Zero, One};
 use std::collections::HashMap;
 use std::ops::*;
 use futures::{prelude::*, channel::*};
@@ -403,6 +403,31 @@ impl Evaluator {
         handle
     }
 
+    /// PolyEval takes as input a shared polynomial f(x) and a point x and returns share of f(x)
+    pub async fn share_poly_eval(&mut self, 
+        f_poly_share: DensePolynomial<F>,
+        x: F,
+     ) -> String {
+
+        // Hijacking the scale gate to compute f(x)
+        let gate_id = self.gate_counters.num_scale;
+        self.gate_counters.num_scale += 1;
+
+        let handle_out = compute_scale_wire_id(gate_id);
+
+
+        let mut sum = F::zero();
+        let mut x_pow = F::one();
+        for coeff in f_poly_share.coeffs.iter() {
+            sum += coeff * &x_pow;
+            x_pow *= x;
+        }
+
+        self.wire_shares.insert(handle_out.clone(), sum);
+        handle_out
+
+    }
+
     /// TODO: HACK ALERT! make this a little more secure please!
     pub async fn beaver(&mut self) -> (String, String, String) {
         let gate_id = self.gate_counters.num_beaver;
@@ -632,6 +657,26 @@ impl Evaluator {
         // Compute f_polynomial
         let f_name = String::from("pi");
         let f_poly = utils::interpolate_poly_over_mult_subgroup(&f_shares);
+
+        let divisor = DensePolynomial::from_coefficients_vec(vec![F::from(1), -z]);
+
+        // Divide by (X-z)
+        let (quotient, _remainder) = 
+            DenseOrSparsePolynomial::divide_with_q_and_r(
+                &(&f_poly).into(),
+                &(&divisor).into(),
+            ).unwrap();
+
+        let pi_poly = utils::commit_poly(&quotient);
+        let pi = self.add_g1_elements_from_all_parties(&pi_poly, &f_name).await;
+
+        pi
+    }
+
+    pub async fn eval_proof_with_share_poly(&mut self, share_poly: DensePolynomial<F>, z: F) -> G1 {
+        // Compute f_polynomial
+        let f_name = String::from("pi");
+        let f_poly = share_poly;
 
         let divisor = DensePolynomial::from_coefficients_vec(vec![F::from(1), -z]);
 

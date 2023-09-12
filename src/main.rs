@@ -1,6 +1,6 @@
 use std::{thread, collections::{HashMap, HashSet}, time::Duration, vec, ops::*};
 use ark_ec::{CurveGroup, AffineRepr, pairing::Pairing};
-use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
+use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, GeneralEvaluationDomain, EvaluationDomain};
 use ark_serialize::CanonicalSerialize;
 use ark_std::{Zero, One};
 use async_std::task;
@@ -20,6 +20,7 @@ mod kzg;
 use address_book::*;
 use evaluator::*;
 use common::*;
+use kzg::*;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -178,7 +179,7 @@ async fn compute_permutation_argument(
     evaluator: &mut Evaluator,
     card_share_handles: Vec<String>,
     card_shares: &Vec<F>
-) {
+) -> PermutationProof {
     let mut r_is = vec![]; //vector of (handle, share_value) pairs
     let mut r_inv_is = vec![]; //vector of (handle, share_value) pairs
 
@@ -310,7 +311,7 @@ async fn compute_permutation_argument(
     let t_com = evaluator.add_g1_elements_from_all_parties(&t_share_com, &String::from("t")).await;
 
     // Compute d_i
-    let mut d_is = vec![];
+    let mut d_is : Vec<F> = vec![];
 
     for i in 0..52 {
         let (h_a, h_b, h_c) = evaluator.beaver().await;
@@ -329,7 +330,72 @@ async fn compute_permutation_argument(
         d_is.push(- evaluator.get_wire(&minus_d_i));
     }
 
+    // Compute share polynomials of d(X)
+    let d_share_poly = DensePolynomial::<F>::from_coefficients_vec(d_is.clone());
 
+    // Compute q(X) and r(X) as quotient and remainder of d(X) / (X^52 - 1)
+    let domain = GeneralEvaluationDomain::<F>::new(52).unwrap();
+    let (q_share_poly, _) = d_share_poly.divide_by_vanishing_poly(domain).unwrap();
+
+    // Commit to q(X)
+    let q_share_com = utils::commit_poly(&q_share_poly);
+    let q_com = evaluator.add_g1_elements_from_all_parties(&q_share_com, &String::from("q")).await;
+
+    // Compute y2 = hash(v_com, f_com, q_com, t_com, g_com)
+    let mut v_bytes = Vec::new();
+    let mut f_bytes = Vec::new();
+    let mut q_bytes = Vec::new();
+    let mut t_bytes = Vec::new();
+    let mut g_bytes = Vec::new();
+
+    v_com.serialize_uncompressed(&mut v_bytes).unwrap();
+    f_com.serialize_uncompressed(&mut f_bytes).unwrap();
+    q_com.serialize_uncompressed(&mut q_bytes).unwrap();
+    t_com.serialize_uncompressed(&mut t_bytes).unwrap();
+    g_com.serialize_uncompressed(&mut g_bytes).unwrap();
+
+    let y2 = utils::fs_hash(vec![&v_bytes, &f_bytes, &q_bytes, &t_bytes, &g_bytes], 1)[0];
+
+    let w = utils::multiplicative_subgroup_of_size(64);
+    let w51 = utils::compute_power(&w, 51);
+
+    // Evaluate t(x) at w^51
+    let h_y1 = evaluator.share_poly_eval(t_share_poly.clone(), w51).await;
+    let pi_1 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), w51).await;
+
+    // Evaluate t(x) at y2
+    let h_y2 = evaluator.share_poly_eval(t_share_poly.clone(), y2).await;
+    let pi_2 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), y2).await;
+
+    // Evaluate t(x) at w * y2
+    let h_y3 = evaluator.share_poly_eval(t_share_poly.clone(), w * y2).await;
+    let pi_3 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), w * y2).await;
+
+    // Evaluate g(x) at w * y2
+    let h_y4 = evaluator.share_poly_eval(g_share_poly.clone(), w * y2).await;
+    let pi_4 = evaluator.eval_proof_with_share_poly(g_share_poly.clone(), w * y2).await;
+
+    // Evaluate q(x) at y2
+    let h_y5 = evaluator.share_poly_eval(q_share_poly.clone(), y2).await;
+    let pi_5 = evaluator.eval_proof_with_share_poly(q_share_poly.clone(), y2).await;
+
+    PermutationProof {
+        y1: evaluator.get_wire(&h_y1),
+        y2: evaluator.get_wire(&h_y2),
+        y3: evaluator.get_wire(&h_y3),
+        y4: evaluator.get_wire(&h_y4),
+        y5: evaluator.get_wire(&h_y5),
+        pi_1,
+        pi_2,
+        pi_3,
+        pi_4,
+        pi_5,
+        v_com,
+        f_com,
+        q_com,
+        t_com,
+        g_com
+    }
 }
 
 async fn encrypt_and_prove<'a>(
