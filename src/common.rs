@@ -1,4 +1,5 @@
 use ark_serialize::CanonicalSerialize;
+use num_bigint::BigUint;
 use serde::{Serialize, Deserialize};
 use crate::evaluator::*;
 
@@ -45,9 +46,9 @@ pub struct PermutationProof {
 
 /// EncryptProof is a structure for the encryptions and attached proofs
 /// produced by encrypt_and_prove and verified by local_verify_encryption_proof
-pub struct EncryptProof<'a> {
+pub struct EncryptProof {
     pub pk: G2,
-    pub ids: Vec<&'a [u8]>,
+    pub ids: Vec<BigUint>,
     pub card_commitment: G1,
     pub masked_commitments: Vec<G1>,
     pub masked_evals: Vec<F>,
@@ -56,7 +57,7 @@ pub struct EncryptProof<'a> {
     pub sigma_proof: Option<SigmaProof>,
 }
 
-impl <'a> EncryptProof<'a> {
+impl EncryptProof {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
 
@@ -65,8 +66,7 @@ impl <'a> EncryptProof<'a> {
         bytes.extend_from_slice(&pk_bytes);
 
         for id in &self.ids {
-            bytes.extend_from_slice(&(id.len() as u32).to_le_bytes());
-            bytes.extend_from_slice(id);
+            bytes.extend_from_slice(&id.to_bytes_be());
         }
 
         let mut card_commitment_bytes = Vec::new();
