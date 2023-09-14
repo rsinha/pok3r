@@ -38,11 +38,9 @@ pub struct PermutationProof {
     pub pi_3: G1,
     pub pi_4: G1,
     pub pi_5: G1,
-    pub v_com: G1,
     pub f_com: G1,
     pub q_com: G1,
     pub t_com: G1,
-    pub g_com: G1
 }
 
 /// EncryptProof is a structure for the encryptions and attached proofs

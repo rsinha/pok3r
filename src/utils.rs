@@ -64,8 +64,15 @@ pub fn interpolate_poly_over_mult_subgroup(v: &Vec<F>) -> DensePolynomial<F> {
 pub fn commit_poly(f: &DensePolynomial<F>) -> G1 {
     // fixed seed to make sure all parties use the same KZG params
     let mut seeded_rng = StdRng::from_seed([42u8; 32]);
-    let params = KZG::setup(f.degree(), &mut seeded_rng).expect("Setup failed");
+    let params = KZG::setup(1024, &mut seeded_rng).expect("Setup failed");
     KZG::commit_g1(&params, f).unwrap()
+}
+
+pub fn kzg_check(comm: &G1, x: &F, eval: &F, proof: &G1) -> bool {
+    // fixed seed to make sure all parties use the same KZG params
+    let mut seeded_rng = StdRng::from_seed([42u8; 32]);
+    let params = KZG::setup(1024, &mut seeded_rng).expect("Setup failed");
+    KZG::check(&params, &comm, *x, *eval, &proof)
 }
 
 pub fn compute_additive_shares(value: &F, num_shares: usize) -> Vec<F> {

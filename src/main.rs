@@ -1,6 +1,7 @@
 use std::{thread, collections::{HashMap, HashSet}, time::Duration, vec, ops::*};
 use ark_ec::{CurveGroup, AffineRepr, pairing::Pairing};
-use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, GeneralEvaluationDomain, EvaluationDomain};
+use ark_ff::Field;
+use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, GeneralEvaluationDomain, EvaluationDomain, Polynomial};
 use ark_serialize::CanonicalSerialize;
 use ark_std::{Zero, One};
 use async_std::task;
@@ -390,12 +391,97 @@ async fn compute_permutation_argument(
         pi_3,
         pi_4,
         pi_5,
-        v_com,
         f_com,
         q_com,
-        t_com,
-        g_com
+        t_com
     }
+}
+
+async fn verify_permutation_argument(
+    perm_proof: &PermutationProof,
+) -> bool {
+    let mut b = true;
+
+    // Compute v(X) from powers of w
+    let w = utils::multiplicative_subgroup_of_size(64);
+    let w51 = utils::compute_power(&w, 51);
+
+    let v_evals: Vec<F> = (0..52)
+        .into_iter()
+        .map(|i| utils::compute_power(&w, i as u64))
+        .collect();
+
+    let v = utils::interpolate_poly_over_mult_subgroup(&v_evals);
+    let v_com = utils::commit_poly(&v);
+
+    // Compute hash1 and hash2
+    let mut v_bytes = Vec::new();
+    let mut f_bytes = Vec::new();
+    let mut q_bytes = Vec::new();
+    let mut t_bytes = Vec::new();
+    let mut g_bytes = Vec::new();
+
+    v_com.serialize_uncompressed(&mut v_bytes).unwrap();
+    perm_proof.f_com.serialize_uncompressed(&mut f_bytes).unwrap();
+
+    let hash1 = utils::fs_hash(vec![&v_bytes, &f_bytes], 1)[0];
+
+    // Compute g_com from f_com
+    let g_com = (perm_proof.f_com.clone() + G1::generator().mul(hash1)).into_affine();
+
+    perm_proof.q_com.serialize_uncompressed(&mut q_bytes).unwrap();
+    perm_proof.t_com.serialize_uncompressed(&mut t_bytes).unwrap();
+    g_com.serialize_uncompressed(&mut g_bytes).unwrap();
+
+    let hash2 = utils::fs_hash(vec![&v_bytes, &f_bytes, &q_bytes, &t_bytes, &g_bytes], 1)[0];
+    
+    // Check all evaluation proofs
+    b = b && utils::kzg_check(
+        &perm_proof.t_com,
+        &w51,
+        &perm_proof.y1,
+        &perm_proof.pi_1
+    );
+
+    b = b && utils::kzg_check(
+        &perm_proof.t_com,
+        &hash2,
+        &perm_proof.y2,
+        &perm_proof.pi_2
+    );
+
+    b = b && utils::kzg_check(
+        &perm_proof.t_com,
+        &(w * hash2),
+        &perm_proof.y3,
+        &perm_proof.pi_3
+    );
+
+    b = b && utils::kzg_check(
+        &g_com,
+        &(w * hash2),
+        &perm_proof.y4,
+        &perm_proof.pi_4
+    );
+
+    b = b && utils::kzg_check(
+        &perm_proof.q_com,
+        &hash2,
+        &perm_proof.y5,
+        &perm_proof.pi_5
+    );
+
+    // Check 1 : y3 * (v(w*hash2) + hash1) - y2 * y4 = y5 * (hash2^k - 1)
+    let tmp1 = perm_proof.y3 * (v.evaluate(& (w * &hash2)) + hash1);
+    let tmp2 = perm_proof.y2 * perm_proof.y4;
+    let tmp3 = perm_proof.y5 * (hash2.pow([52]) - F::one());
+
+    b = b && (tmp1 - tmp2 == tmp3);
+
+    // Check 2 : y1 = 1
+    b = b && (perm_proof.y1 == F::one());
+    
+    b
 }
 
 async fn encrypt_and_prove<'a>(
@@ -523,7 +609,7 @@ async fn encrypt_and_prove<'a>(
     }
 }
 
-async fn local_verify_encrption_proof(
+async fn local_verify_encryption_proof(
     evaluator: &mut Evaluator,
     proof: &EncryptProof<'_>,
 ) -> bool {
