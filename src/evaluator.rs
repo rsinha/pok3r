@@ -647,7 +647,7 @@ impl Evaluator {
         self.wire_shares.get(handle).unwrap().clone()
     }
 
-    pub async fn eval_proof(&mut self, f_handles: Vec<String>, z: F) -> G1 {
+    pub async fn eval_proof(&mut self, f_handles: Vec<String>, z: F, f_name: String) -> G1 {
         // get shares
         let f_shares = f_handles
             .iter()
@@ -655,7 +655,6 @@ impl Evaluator {
             .collect::<Vec<F>>();
 
         // Compute f_polynomial
-        let f_name = String::from("pi");
         let f_poly = utils::interpolate_poly_over_mult_subgroup(&f_shares);
 
         let divisor = DensePolynomial::from_coefficients_vec(vec![F::from(1), -z]);
@@ -673,9 +672,8 @@ impl Evaluator {
         pi
     }
 
-    pub async fn eval_proof_with_share_poly(&mut self, share_poly: DensePolynomial<F>, z: F) -> G1 {
+    pub async fn eval_proof_with_share_poly(&mut self, share_poly: DensePolynomial<F>, z: F, f_name: String) -> G1 {
         // Compute f_polynomial
-        let f_name = String::from("pi");
         let f_poly = share_poly;
 
         let divisor = DensePolynomial::from_coefficients_vec(vec![F::from(1), -z]);
@@ -712,13 +710,13 @@ impl Evaluator {
         let c1 = self.exp_and_reveal_g1(
             vec![<Curve as Pairing>::G1Affine::generator()], 
             vec![mask_share_handle.clone()], 
-            &String::from("c1")
+            &String::from("c1_".to_owned() + msg_share_handle + mask_share_handle)
         ).await;
         
         let c2 = self.exp_and_reveal_gt(
             vec![Gt::generator(), h.clone()], 
             vec![msg_share_handle.clone(), mask_share_handle.clone()], 
-            &String::from("c2")
+            &String::from("c2".to_owned() + msg_share_handle + mask_share_handle)
         ).await;
     
         (c1, c2)

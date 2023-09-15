@@ -168,7 +168,28 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     //stores set of card prfs encountered
     let mut prfs = HashSet::new();
 
-    while card_share_values.len() < 64 { //until you get 64 unique cards
+    // Compute prfs for cards 53 to 64 and add to prfs
+    for i in 52..64 {
+        let h_r = evaluator.ran();
+        let (h_a, h_b, h_c) = evaluator.beaver().await;
+
+        let w = utils::multiplicative_subgroup_of_size(64);
+        let ω_pow_i = utils::compute_power(&w, i as u64);
+
+        // y_i = g^{1 / (sk + w_i)}
+        let denom = evaluator.clear_add(&sk, ω_pow_i);
+        let t_i = evaluator.inv(
+            &denom,
+            &h_r,
+            (&h_a, &h_b, &h_c)
+        ).await;
+        let y_i = evaluator.output_wire_in_exponent(&t_i).await;
+
+        prfs.insert(y_i.clone());
+    }
+
+    // TODO : After batching, this cannot be variable - must run ~1000 times or so to get enough cards with high probability
+    while card_share_values.len() < 52 { //until you get 64 unique cards
         let h_r = evaluator.ran();
         let (h_a, h_b, h_c) = evaluator.beaver().await;
 
@@ -205,7 +226,7 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
 async fn compute_permutation_argument(
     evaluator: &mut Evaluator,
     card_share_handles: Vec<String>,
-    card_shares: &Vec<F>
+    card_share_values: &Vec<F>
 ) -> PermutationProof {
     let mut r_is = vec![]; //vector of (handle, share_value) pairs
     let mut r_inv_is = vec![]; //vector of (handle, share_value) pairs
@@ -242,7 +263,7 @@ async fn compute_permutation_argument(
     }
 
     let f_name = String::from("f");
-    let f_share = utils::interpolate_poly_over_mult_subgroup(card_shares);
+    let f_share = utils::interpolate_poly_over_mult_subgroup(card_share_values);
     let f_share_com = utils::commit_poly(&f_share);
     let f_com = evaluator.add_g1_elements_from_all_parties(&f_share_com, &f_name).await;
 
@@ -271,7 +292,7 @@ async fn compute_permutation_argument(
         let g_i = f_i + y1;
         g_shares.push(g_i);
 
-        h_g_shares[i] = evaluator.clear_add(&card_share_handles[i], y1);
+        h_g_shares.push(evaluator.clear_add(&card_share_handles[i], y1));
     }
 
     let g_share_poly = DensePolynomial::from_coefficients_vec(g_shares.clone());
@@ -388,23 +409,23 @@ async fn compute_permutation_argument(
 
     // Evaluate t(x) at w^51
     let h_y1 = evaluator.share_poly_eval(t_share_poly.clone(), w51).await;
-    let pi_1 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), w51).await;
+    let pi_1 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), w51, String::from("perm_pi_1")).await;
 
     // Evaluate t(x) at y2
     let h_y2 = evaluator.share_poly_eval(t_share_poly.clone(), y2).await;
-    let pi_2 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), y2).await;
+    let pi_2 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), y2, String::from("perm_pi_2")).await;
 
     // Evaluate t(x) at w * y2
     let h_y3 = evaluator.share_poly_eval(t_share_poly.clone(), w * y2).await;
-    let pi_3 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), w * y2).await;
+    let pi_3 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), w * y2, String::from("perm_pi_3")).await;
 
     // Evaluate g(x) at w * y2
     let h_y4 = evaluator.share_poly_eval(g_share_poly.clone(), w * y2).await;
-    let pi_4 = evaluator.eval_proof_with_share_poly(g_share_poly.clone(), w * y2).await;
+    let pi_4 = evaluator.eval_proof_with_share_poly(g_share_poly.clone(), w * y2, String::from("perm_pi_4")).await;
 
     // Evaluate q(x) at y2
     let h_y5 = evaluator.share_poly_eval(q_share_poly.clone(), y2).await;
-    let pi_5 = evaluator.eval_proof_with_share_poly(q_share_poly.clone(), y2).await;
+    let pi_5 = evaluator.eval_proof_with_share_poly(q_share_poly.clone(), y2, String::from("perm_pi_5")).await;
 
     PermutationProof {
         y1: evaluator.get_wire(&h_y1),
@@ -635,7 +656,7 @@ async fn encrypt_and_prove(
     // Get all cards from card handles
     let mut cards = vec![];
     for h in card_handles.clone() {
-        cards.push(evaluator.output_wire(&h).await);
+        cards.push(evaluator.get_wire(&h));
     }
 
     // Sample common randomness for encryption
@@ -656,7 +677,7 @@ async fn encrypt_and_prove(
 
     for i in 0..52 {
         let z = utils::compute_power(&w, i);
-        let pi_plain_i = evaluator.eval_proof(card_handles.clone(), z).await;
+        let pi_plain_i = evaluator.eval_proof(card_handles.clone(), z, format!("pi_plain_{}", i)).await;
         pi_plain_vec.push(pi_plain_i);
     }
     
