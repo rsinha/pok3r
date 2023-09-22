@@ -36,6 +36,7 @@ pub enum Gate {
     EXP = 6, // denotes an exponentiation (by 64) gate
     SCALE = 7, // denotes a scaling gate
     CLEARADD = 8, // denotes a addition gate for one input in clear and another shared
+    FIXED = 9, // denotes a fixed value that is shared
     //OUTPUT = 5 // denotes an output gate that all parties observe in the clear
 }
 
@@ -83,6 +84,21 @@ fn compute_ran_input_wire_id(gate_id: u64) -> String {
     let mut hasher_input = Vec::new();
     hasher_input.extend_from_slice(&(Gate::RAN as u64).to_be_bytes());
     hasher_input.extend_from_slice(&gate_id.to_be_bytes());
+
+    let mut hasher = Sha256::new();
+    hasher.update(&hasher_input);
+    let hash = hasher.finalize();
+
+    bs58::encode(hash).into_string()
+}
+
+fn compute_fixed_wire_id(value: F) -> String {
+    let mut hasher_input = Vec::new();
+    hasher_input.extend_from_slice(&(Gate::FIXED as u64).to_be_bytes());
+
+    let mut value_bytes = Vec::new();
+    value.serialize_uncompressed(&mut value_bytes).unwrap();
+    hasher_input.extend_from_slice(&value_bytes);
 
     let mut hasher = Sha256::new();
     hasher.update(&hasher_input);
@@ -400,6 +416,19 @@ impl Evaluator {
             }
         };
         self.wire_shares.insert(handle.clone(), share_x_mul_y);
+        handle
+    }
+
+    pub async fn fixed_wire_handle(&mut self, value: F) -> String {
+        let handle = compute_fixed_wire_id(value);
+        
+        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
+        let share: F = match my_id {
+            0 => value,
+            _ => F::from(0)
+        };
+
+        self.wire_shares.insert(handle.clone(), share);
         handle
     }
 

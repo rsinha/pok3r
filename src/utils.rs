@@ -10,7 +10,7 @@ use ark_poly::{
     univariate::DensePolynomial, 
     EvaluationDomain, 
     Radix2EvaluationDomain,
-    Evaluations
+    Evaluations, GeneralEvaluationDomain
 };
 use ark_ec::{pairing::Pairing, CurveGroup};
 use ark_serialize::*;
@@ -56,7 +56,7 @@ pub fn interpolate_poly_over_mult_subgroup(v: &Vec<F>) -> DensePolynomial<F> {
         evals.push(v[i]);
     }
 
-    let domain = Radix2EvaluationDomain::<F>::new(n).unwrap();
+    let domain = GeneralEvaluationDomain::<F>::new(n).unwrap();
     let eval_form = Evaluations::from_vec_and_domain(evals, domain);
     eval_form.interpolate()
 }
@@ -72,7 +72,14 @@ pub fn kzg_check(comm: &G1, x: &F, eval: &F, proof: &G1) -> bool {
     // fixed seed to make sure all parties use the same KZG params
     let mut seeded_rng = StdRng::from_seed([42u8; 32]);
     let params = KZG::setup(1024, &mut seeded_rng).expect("Setup failed");
-    KZG::check(&params, &comm, *x, *eval, &proof)
+    let b = KZG::check(&params, &comm, *x, *eval, &proof);
+    if b == true {
+        println!("KZG check passed");
+    }
+    if b == false {
+        println!("KZG check failed");
+    }
+    b
 }
 
 pub fn compute_additive_shares(value: &F, num_shares: usize) -> Vec<F> {
