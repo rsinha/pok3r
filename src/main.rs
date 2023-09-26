@@ -467,7 +467,7 @@ async fn compute_permutation_argument(
     let w = utils::multiplicative_subgroup_of_size(64);
     let w63 = utils::compute_power(&w, 63);
 
-    // Evaluate t(x) at w^51
+    // Evaluate t(x) at w^63
     let h_y1 = evaluator.share_poly_eval(t_share_poly.clone(), w63).await;
     let pi_1 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), w63, String::from("perm_pi_1")).await;
 
@@ -488,11 +488,11 @@ async fn compute_permutation_argument(
     let pi_5 = evaluator.eval_proof_with_share_poly(q_share_poly.clone(), y2, String::from("perm_pi_5")).await;
 
     PermutationProof {
-        y1: evaluator.get_wire(&h_y1),
-        y2: evaluator.get_wire(&h_y2),
-        y3: evaluator.get_wire(&h_y3),
-        y4: evaluator.get_wire(&h_y4),
-        y5: evaluator.get_wire(&h_y5),
+        y1: evaluator.output_wire(&h_y1).await,
+        y2: evaluator.output_wire(&h_y2).await,
+        y3: evaluator.output_wire(&h_y3).await,
+        y4: evaluator.output_wire(&h_y4).await,
+        y5: evaluator.output_wire(&h_y5).await,
         pi_1,
         pi_2,
         pi_3,
@@ -543,35 +543,35 @@ async fn verify_permutation_argument(
     let hash2 = utils::fs_hash(vec![&v_bytes, &f_bytes, &q_bytes, &t_bytes, &g_bytes], 1)[0];
     
     // Check all evaluation proofs
-    b = b && utils::kzg_check(
+    b = b & utils::kzg_check(
         &perm_proof.t_com,
         &w63,
         &perm_proof.y1,
         &perm_proof.pi_1
     );
 
-    b = b && utils::kzg_check(
+    b = b & utils::kzg_check(
         &perm_proof.t_com,
         &hash2,
         &perm_proof.y2,
         &perm_proof.pi_2
     );
 
-    b = b && utils::kzg_check(
+    b = b & utils::kzg_check(
         &perm_proof.t_com,
         &(w * hash2),
         &perm_proof.y3,
         &perm_proof.pi_3
     );
 
-    b = b && utils::kzg_check(
+    b = b & utils::kzg_check(
         &g_com,
         &(w * hash2),
         &perm_proof.y4,
         &perm_proof.pi_4
     );
 
-    b = b && utils::kzg_check(
+    b = b & utils::kzg_check(
         &perm_proof.q_com,
         &hash2,
         &perm_proof.y5,
@@ -583,10 +583,18 @@ async fn verify_permutation_argument(
     let tmp2 = perm_proof.y2 * perm_proof.y4;
     let tmp3 = perm_proof.y5 * (hash2.pow([64]) - F::one());
 
-    b = b && (tmp1 - tmp2 == tmp3);
+    b = b & (tmp1 - tmp2 == tmp3);
+
+    if tmp1 - tmp2 != tmp3 {
+        println!("VerifyPerm - Check 1 failed");
+    }
 
     // Check 2 : y1 = 1
-    b = b && (perm_proof.y1 == F::one());
+    b = b & (perm_proof.y1 == F::one());
+
+    if perm_proof.y1 != F::one() {
+        println!("VerifyPerm - Check 2 failed");
+    }
     
     b
 }
@@ -948,3 +956,5 @@ pub async fn test_sigma(evaluator: &mut Evaluator) {
     println!("Sigma proof test passed!");
 
 }
+
+// TODO - test_kzg

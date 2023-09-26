@@ -75,9 +75,17 @@ pub fn kzg_check(comm: &G1, x: &F, eval: &F, proof: &G1) -> bool {
     let b = KZG::check(&params, &comm, *x, *eval, &proof);
     if b == true {
         println!("KZG check passed");
+        println!("comm: {}", comm);
+        println!("x: {}", x);
+        println!("eval: {}", eval);
+        println!("proof: {}", proof);
     }
     if b == false {
         println!("KZG check failed");
+        println!("comm: {}", comm);
+        println!("x: {}", x);
+        println!("eval: {}", eval);
+        println!("proof: {}", proof);
     }
     b
 }
