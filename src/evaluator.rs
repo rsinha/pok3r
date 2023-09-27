@@ -705,7 +705,7 @@ impl Evaluator {
         // Compute f_polynomial
         let f_poly = share_poly;
 
-        let divisor = DensePolynomial::from_coefficients_vec(vec![F::from(1), -z]);
+        let divisor = DensePolynomial::from_coefficients_vec(vec![-z, F::from(1)]);
 
         // Divide by (X-z)
         let (quotient, _remainder) = 
