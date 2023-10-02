@@ -26,6 +26,8 @@ use ark_ff::{
 };
 use num_bigint::{BigInt, BigUint, Sign};
 
+use crate::kzg::UniversalParams;
+
 type Curve = ark_bls12_377::Bls12_377;
 type KZG = crate::kzg::KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 type F = ark_bls12_377::Fr;
@@ -61,24 +63,19 @@ pub fn interpolate_poly_over_mult_subgroup(v: &Vec<F>) -> DensePolynomial<F> {
     eval_form.interpolate()
 }
 
-pub fn commit_poly(f: &DensePolynomial<F>) -> G1 {
-    // fixed seed to make sure all parties use the same KZG params
+// Generate setup with fixed seed to make sure all parties use the same KZG params
+pub fn setup_kzg(n: usize) -> UniversalParams<Curve> {
     let mut seeded_rng = StdRng::from_seed([42u8; 32]);
-    let params = KZG::setup(1024, &mut seeded_rng).expect("Setup failed");
-    KZG::commit_g1(&params, f).unwrap()
+    let params = KZG::setup(n, &mut seeded_rng).expect("Setup failed");
+    params
 }
 
-pub fn kzg_check(comm: &G1, x: &F, eval: &F, proof: &G1) -> bool {
-    // fixed seed to make sure all parties use the same KZG params
-    let mut seeded_rng = StdRng::from_seed([42u8; 32]);
-    let params = KZG::setup(1024, &mut seeded_rng).expect("Setup failed");
-    let b = KZG::check(&params, &comm, *x, *eval, &proof);
-    if b == true {
-        println!("KZG check passed");
-    }
-    if b == false {
-        println!("KZG check failed");
-    }
+pub fn commit_poly(pp: &UniversalParams<Curve>, f: &DensePolynomial<F>) -> G1 {
+    KZG::commit_g1(pp, f).unwrap()
+}
+
+pub fn kzg_check(pp: &UniversalParams<Curve>, comm: &G1, x: &F, eval: &F, proof: &G1) -> bool {
+    let b = KZG::check(pp, &comm, *x, *eval, &proof);
     b
 }
 

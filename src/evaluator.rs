@@ -18,6 +18,7 @@ use num_bigint::BigUint;
 
 use crate::address_book::*;
 use crate::common::*;
+use crate::kzg::UniversalParams;
 use crate::utils;
 
 pub type Curve = ark_bls12_377::Bls12_377;
@@ -707,7 +708,7 @@ impl Evaluator {
         self.wire_shares.get(handle).unwrap().clone()
     }
 
-    pub async fn eval_proof(&mut self, f_handles: Vec<String>, z: F, f_name: String) -> G1 {
+    pub async fn eval_proof(&mut self, pp: &UniversalParams<Curve>, f_handles: Vec<String>, z: F, f_name: String) -> G1 {
         // get shares
         let f_shares = f_handles
             .iter()
@@ -726,13 +727,13 @@ impl Evaluator {
                 &(&divisor).into(),
             ).unwrap();
 
-        let pi_poly = utils::commit_poly(&quotient);
+        let pi_poly = utils::commit_poly(pp, &quotient);
         let pi = self.add_g1_elements_from_all_parties(&pi_poly, &f_name).await;
 
         pi
     }
 
-    pub async fn eval_proof_with_share_poly(&mut self, share_poly: DensePolynomial<F>, z: F, f_name: String) -> G1 {
+    pub async fn eval_proof_with_share_poly(&mut self, pp: &UniversalParams<Curve>, share_poly: DensePolynomial<F>, z: F, f_name: String) -> G1 {
         // Compute f_polynomial
         let f_poly = share_poly;
 
@@ -745,7 +746,7 @@ impl Evaluator {
                 &(&divisor).into(),
             ).unwrap();
 
-        let pi_poly = utils::commit_poly(&quotient);
+        let pi_poly = utils::commit_poly(pp, &quotient);
         let pi = self.add_g1_elements_from_all_parties(&pi_poly, &f_name).await;
 
         pi

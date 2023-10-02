@@ -8,6 +8,7 @@ use async_std::task;
 //use std::sync::mpsc;
 use futures::channel::*;
 use clap::Parser;
+use kzg::UniversalParams;
 use num_bigint::BigUint;
 use rand::{rngs::StdRng, SeedableRng};
 use serde_json::json;
@@ -103,16 +104,20 @@ async fn main() {
     test_dist_kzg(&mut mpc).await;
     test_share_poly_mult(&mut mpc).await;
 
+    // KZG setup runs once
+    let pp = utils::setup_kzg(1024);
+
     // Actual protocol
     let (card_share_handles, card_shares) = shuffle_deck(&mut mpc).await;
     
     let perm_proof = compute_permutation_argument(
+        &pp, 
         &mut mpc, 
         card_share_handles.clone(), 
         &card_shares
     ).await;
 
-    let verified = verify_permutation_argument(&perm_proof).await;
+    let verified = verify_permutation_argument(&pp, &perm_proof).await;
 
     if verified {
         println!("Permutation argument verified");
@@ -131,8 +136,8 @@ async fn main() {
         ids.push(id);
     }
 
-    let encrypt_proof = encrypt_and_prove(&mut mpc, card_share_handles.clone(), perm_proof.f_com, pk, ids).await;
-    let verified = local_verify_encryption_proof(&encrypt_proof).await;
+    let encrypt_proof = encrypt_and_prove(&pp, &mut mpc, card_share_handles.clone(), perm_proof.f_com, pk, ids).await;
+    let verified = local_verify_encryption_proof(&pp, &encrypt_proof).await;
 
     if verified {
         println!("Encryption proof verified");
@@ -243,6 +248,7 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
 }
 
 async fn compute_permutation_argument(
+    pp: &UniversalParams<Curve>,
     evaluator: &mut Evaluator,
     card_share_handles: Vec<String>,
     card_share_values: &Vec<F>
@@ -297,7 +303,7 @@ async fn compute_permutation_argument(
     let f_name = String::from("perm_f");
     let f_share = 
         utils::interpolate_poly_over_mult_subgroup(card_share_values);
-    let f_share_com = utils::commit_poly(&f_share);
+    let f_share_com = utils::commit_poly(pp, &f_share);
 
     // Commit to f(X)
     let f_com = evaluator.add_g1_elements_from_all_parties(&f_share_com, &f_name).await;
@@ -312,7 +318,7 @@ async fn compute_permutation_argument(
     let v = utils::interpolate_poly_over_mult_subgroup(&v_evals);
     
     // Commit to v(X)
-    let v_com = utils::commit_poly(&v);
+    let v_com = utils::commit_poly(pp, &v);
 
     // 12: Parties locally compute γ1 = FSHash(C,V )
     // Hash v_com and f_com to obtain randomness for batching
@@ -342,13 +348,13 @@ async fn compute_permutation_argument(
         utils::interpolate_poly_over_mult_subgroup(&g_eval_shares.clone());
 
     // Commit to g(X)
-    let g_share_com = utils::commit_poly(&g_share_poly);
+    let g_share_com = utils::commit_poly(pp, &g_share_poly);
     let g_com = evaluator.add_g1_elements_from_all_parties(&g_share_com, &String::from("perm_g")).await;
 
     // Assert that g(X) is correctly computed in both prover and verifier
     // Commit to constant polynomial const(x) = y1
     let const_y1 = DensePolynomial::from_coefficients_vec(vec![y1]);
-    let const_com_y1 = utils::commit_poly(&const_y1);
+    let const_com_y1 = utils::commit_poly(pp, &const_y1);
 
     let g_com_verifier = (f_com.clone() + const_com_y1).into_affine();
     assert_eq!(g_com, g_com_verifier);
@@ -431,7 +437,7 @@ async fn compute_permutation_argument(
         .map(|x| x.1)
         .collect();
     let t_share_poly = utils::interpolate_poly_over_mult_subgroup(&t_shares);
-    let t_share_com = utils::commit_poly(&t_share_poly);
+    let t_share_com = utils::commit_poly(pp, &t_share_poly);
     let t_com = evaluator.add_g1_elements_from_all_parties(&t_share_com, &String::from("t")).await;
 
     let tx_by_omega_share_poly = utils::poly_domain_div_ω(&t_share_poly, &ω);
@@ -460,7 +466,7 @@ async fn compute_permutation_argument(
     let (q_share_poly, _) = d_share_poly.divide_by_vanishing_poly(domain).unwrap();
 
     // Commit to q(X)
-    let q_share_com = utils::commit_poly(&q_share_poly);
+    let q_share_com = utils::commit_poly(pp, &q_share_poly);
     let q_com = evaluator.add_g1_elements_from_all_parties(&q_share_com, &String::from("perm_q")).await;
 
     // Compute y2 = hash(v_com, f_com, q_com, t_com, g_com)
@@ -484,23 +490,23 @@ async fn compute_permutation_argument(
 
     // Evaluate t(x) at w^63
     let h_y1 = evaluator.share_poly_eval(t_share_poly.clone(), w63).await;
-    let pi_1 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), w63, String::from("perm_pi_1")).await;
+    let pi_1 = evaluator.eval_proof_with_share_poly(pp, t_share_poly.clone(), w63, String::from("perm_pi_1")).await;
 
     // Evaluate t(x) at y2
     let h_y2 = evaluator.share_poly_eval(t_share_poly.clone(), y2).await;
-    let pi_2 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), y2, String::from("perm_pi_2")).await;
+    let pi_2 = evaluator.eval_proof_with_share_poly(pp, t_share_poly.clone(), y2, String::from("perm_pi_2")).await;
 
     // Evaluate t(x) at y2 / w
     let h_y3 = evaluator.share_poly_eval(t_share_poly.clone(), y2 / w).await;
-    let pi_3 = evaluator.eval_proof_with_share_poly(t_share_poly.clone(), y2 / w, String::from("perm_pi_3")).await;
+    let pi_3 = evaluator.eval_proof_with_share_poly(pp, t_share_poly.clone(), y2 / w, String::from("perm_pi_3")).await;
 
     // Evaluate g(x) at y2
     let h_y4 = evaluator.share_poly_eval(g_share_poly.clone(), y2).await;
-    let pi_4 = evaluator.eval_proof_with_share_poly(g_share_poly.clone(), y2, String::from("perm_pi_4")).await;
+    let pi_4 = evaluator.eval_proof_with_share_poly(pp, g_share_poly.clone(), y2, String::from("perm_pi_4")).await;
 
     // Evaluate q(x) at y2
     let h_y5 = evaluator.share_poly_eval(q_share_poly.clone(), y2).await;
-    let pi_5 = evaluator.eval_proof_with_share_poly(q_share_poly.clone(), y2, String::from("perm_pi_5")).await;
+    let pi_5 = evaluator.eval_proof_with_share_poly(pp, q_share_poly.clone(), y2, String::from("perm_pi_5")).await;
 
     PermutationProof {
         y1: evaluator.output_wire(&h_y1).await,
@@ -520,6 +526,7 @@ async fn compute_permutation_argument(
 }
 
 async fn verify_permutation_argument(
+    pp: &UniversalParams<Curve>,
     perm_proof: &PermutationProof,
 ) -> bool {
     let mut b = true;
@@ -534,7 +541,7 @@ async fn verify_permutation_argument(
         .collect();
 
     let v = utils::interpolate_poly_over_mult_subgroup(&v_evals);
-    let v_com = utils::commit_poly(&v);
+    let v_com = utils::commit_poly(pp, &v);
 
     // Compute hash1 and hash2
     let mut v_bytes = Vec::new();
@@ -550,7 +557,7 @@ async fn verify_permutation_argument(
 
     // Compute g_com from f_com
     let const_y1 = DensePolynomial::from_coefficients_vec(vec![hash1]);
-    let const_com_y1 = utils::commit_poly(&const_y1);
+    let const_com_y1 = utils::commit_poly(pp, &const_y1);
 
     let g_com = (perm_proof.f_com.clone() + const_com_y1).into_affine();
 
@@ -562,6 +569,7 @@ async fn verify_permutation_argument(
     
     // Check all evaluation proofs
     b = b & utils::kzg_check(
+        pp,
         &perm_proof.t_com,
         &w63,
         &perm_proof.y1,
@@ -569,6 +577,7 @@ async fn verify_permutation_argument(
     );
 
     b = b & utils::kzg_check(
+        pp,
         &perm_proof.t_com,
         &hash2,
         &perm_proof.y2,
@@ -576,6 +585,7 @@ async fn verify_permutation_argument(
     );
 
     b = b & utils::kzg_check(
+        pp,
         &perm_proof.t_com,
         &(hash2 / w),
         &perm_proof.y3,
@@ -583,6 +593,7 @@ async fn verify_permutation_argument(
     );
 
     b = b & utils::kzg_check(
+        pp,
         &g_com,
         &(hash2),
         &perm_proof.y4,
@@ -590,6 +601,7 @@ async fn verify_permutation_argument(
     );
 
     b = b & utils::kzg_check(
+        pp,
         &perm_proof.q_com,
         &hash2,
         &perm_proof.y5,
@@ -733,6 +745,7 @@ pub fn local_verify_sigma_proof(
 }
 
 async fn encrypt_and_prove(
+    pp: &UniversalParams<Curve>,
     evaluator: &mut Evaluator,
     card_handles: Vec<String>,
     card_commitment: G1,
@@ -814,6 +827,7 @@ async fn encrypt_and_prove(
 
         // Compute eval_proof for d_i
         let pi_i = evaluator.eval_proof_with_share_poly(
+            pp, 
             d_i_poly_share, 
             utils::compute_power(&w, i as u64), 
             format!("{}/{}", "enc_prove_pi_", i)
@@ -880,6 +894,7 @@ async fn encrypt_and_prove(
 }
 
 async fn local_verify_encryption_proof(
+    pp: &UniversalParams<Curve>,
     proof: &EncryptProof,
 ) -> bool {
     // Check that all ciphertexts share the same randomness
@@ -893,6 +908,7 @@ async fn local_verify_encryption_proof(
     // Check all the evaluation proofs
     for i in 0..64 {
         if utils::kzg_check(
+            pp,
             &proof.masked_commitments[i], 
             &utils::compute_power(&utils::multiplicative_subgroup_of_size(64), i as u64), 
             &proof.masked_evals[i], 
@@ -949,7 +965,7 @@ async fn local_verify_encryption_proof(
 
 /// Verify that sigma proof is correctly verified by local_verify_sigma_proof
 pub async fn test_sigma(evaluator: &mut Evaluator) {
-    println!("Running test on sigma prove and verify...");
+    println!("testing sigma protocol...");
 
     let mut wit_1_handles = vec![];
     let mut lin_comb_ran = vec![];
@@ -1015,13 +1031,12 @@ pub async fn test_sigma(evaluator: &mut Evaluator) {
     );
         
     assert!(check == true, "Verification failed");
-
-    println!("Sigma proof test passed!");
-
 }
 
 pub fn test_local_kzg() {
-    println!("Running test on local kzg...");
+    println!("testing local kzg...");
+
+    let pp = utils::setup_kzg(1024);
 
     let mut rng = ark_std::test_rng();
     let mut evals = vec![];
@@ -1044,20 +1059,20 @@ pub fn test_local_kzg() {
             &(&divisor).into(),
         ).unwrap();
 
-    let pi_poly = utils::commit_poly(&quotient);
-    let com = utils::commit_poly(&poly);
+    let pi_poly = utils::commit_poly(&pp, &quotient);
+    let com = utils::commit_poly(&pp, &poly);
 
     let poly_eval = poly.evaluate(&point);
 
-    let b = utils::kzg_check(&com, &point, &poly_eval, &pi_poly);
+    let b = utils::kzg_check(&pp, &com, &point, &poly_eval, &pi_poly);
 
     assert!(b == true, "Verification failed");
-    
-    println!("...Local KZG test passed!");
 }
 
 pub async fn test_dist_kzg(evaluator: &mut Evaluator) {
-    println!("Running test on distributed kzg...");
+    println!("testing distributed kzg...");
+
+    let pp = utils::setup_kzg(1024);
 
     let mut evals = vec![];
     // let mut actual_evals = vec![];
@@ -1072,23 +1087,21 @@ pub async fn test_dist_kzg(evaluator: &mut Evaluator) {
     // let actual_evaluation_at_w = evaluator.share_poly_eval(actual_poly.clone(), utils::multiplicative_subgroup_of_size(64)).await;
 
     let poly = utils::interpolate_poly_over_mult_subgroup(&evals);
-    let com_share = utils::commit_poly(&poly);
+    let com_share = utils::commit_poly(&pp, &poly);
     let com = evaluator.add_g1_elements_from_all_parties(&com_share, &String::from("kzg_test_com")).await;
 
     let w = utils::multiplicative_subgroup_of_size(64);
-    let pi = evaluator.eval_proof_with_share_poly(poly.clone(), w, String::from("kzg_test_pi")).await;
+    let pi = evaluator.eval_proof_with_share_poly(&pp, poly.clone(), w, String::from("kzg_test_pi")).await;
 
     let evaluation_at_w = evaluator.share_poly_eval(poly.clone(), w).await;
 
 
-    let b = utils::kzg_check(&com, &w, &evaluator.output_wire(&evaluation_at_w).await, &pi);
+    let b = utils::kzg_check(&pp, &com, &w, &evaluator.output_wire(&evaluation_at_w).await, &pi);
     assert!(b == true, "Verification failed");
-
-    println!("...Distributed KZG test passed!");
 }
 
 async fn test_share_poly_mult(evaluator: &mut Evaluator) {
-    println!("Running test on share poly mult...");
+    println!("testing multiplication of shared polynomials...");
 
     let mut share_evals_1 = vec![];
     let mut share_evals_2 = vec![];
@@ -1120,6 +1133,4 @@ async fn test_share_poly_mult(evaluator: &mut Evaluator) {
     let v_3 = evaluator.output_wire(&poly_3_val).await;
 
     assert_eq!(v_1 * v_2, v_3, "Share poly mult failed");
-    
-    println!("...Share poly mult test passed!");
 }
