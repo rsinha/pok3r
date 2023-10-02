@@ -10,7 +10,7 @@ use ark_poly::{
     univariate::DensePolynomial, 
     EvaluationDomain, 
     Radix2EvaluationDomain,
-    Evaluations, GeneralEvaluationDomain
+    Evaluations, GeneralEvaluationDomain, domain
 };
 use ark_ec::{pairing::Pairing, CurveGroup};
 use ark_serialize::*;
@@ -73,20 +73,12 @@ pub fn kzg_check(comm: &G1, x: &F, eval: &F, proof: &G1) -> bool {
     let mut seeded_rng = StdRng::from_seed([42u8; 32]);
     let params = KZG::setup(1024, &mut seeded_rng).expect("Setup failed");
     let b = KZG::check(&params, &comm, *x, *eval, &proof);
-    // if b == true {
-    //     println!("KZG check passed");
-    //     println!("comm: {}", comm);
-    //     println!("x: {}", x);
-    //     println!("eval: {}", eval);
-    //     println!("proof: {}", proof);
-    // }
-    // if b == false {
-    //     println!("KZG check failed");
-    //     println!("comm: {}", comm);
-    //     println!("x: {}", x);
-    //     println!("eval: {}", eval);
-    //     println!("proof: {}", proof);
-    // }
+    if b == true {
+        println!("KZG check passed");
+    }
+    if b == false {
+        println!("KZG check failed");
+    }
     b
 }
 
@@ -117,6 +109,16 @@ pub fn fs_hash(x: Vec<&[u8]>, num_output: usize) -> Vec<F> {
     let field_elements = hasher.hash_to_field(&x.concat(), num_output);
 
     field_elements
+}
+
+//computes f(x/ω)
+pub fn poly_domain_div_ω(f: &DensePolynomial<F>, ω: &F) -> DensePolynomial<F> {
+    let mut new_poly = f.clone();
+    for i in 1..(f.degree() + 1) { //we don't touch the zeroth coefficient
+        let ω_pow_i: F = ω.pow([i as u64]);
+        new_poly.coeffs[i] = new_poly.coeffs[i] / ω_pow_i;
+    }
+    new_poly
 }
 
 #[cfg(test)]

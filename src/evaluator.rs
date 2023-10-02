@@ -78,8 +78,6 @@ fn compute_beaver_wire_ids(gate_id: u64) -> (String, String, String)
 }
 
 fn compute_ran_input_wire_id(gate_id: u64) -> String {
-
-    //gate_type takes one of 4 possible gate types
     //gate_id denotes a unique identifier for this gate
     let mut hasher_input = Vec::new();
     hasher_input.extend_from_slice(&(Gate::RAN as u64).to_be_bytes());
@@ -168,7 +166,6 @@ fn compute_2_input_gate_output_wire_id(
 
     bs58::encode(hash).into_string()
 }
-
 
 macro_rules! send_over_network {
     ($msg:expr, $tx:expr) => {
@@ -455,6 +452,40 @@ impl Evaluator {
         self.wire_shares.insert(handle_out.clone(), sum);
         handle_out
 
+    }
+
+    /// Should multiply two polynomials with shared coefficients to get a larger degree polynomial with shared coefficients
+    pub async fn share_poly_mult(&mut self, 
+        f_poly_share: DensePolynomial<F>,
+        g_poly_share: DensePolynomial<F>,
+     ) -> DensePolynomial<F> {
+
+        let mut h_evals = Vec::new();
+        let alpha = utils::multiplicative_subgroup_of_size(128);
+        let powers_of_alpha: Vec<F> = (0..128)
+            .into_iter()
+            .map(|i| utils::compute_power(&alpha, i as u64))
+            .collect();
+
+        for i in 0..128 {
+            let f_eval = self.share_poly_eval(f_poly_share.clone(), powers_of_alpha[i]).await;
+            let g_eval = self.share_poly_eval(g_poly_share.clone(), powers_of_alpha[i]).await;
+
+            // Compute h_evals from f_evals and g_evals using Beaver mult
+            let (h_a, h_b, h_c) = self.beaver().await;
+            let h_eval = self.mult(
+                &f_eval, 
+                &g_eval, 
+                (&h_a, &h_b, &h_c)
+            ).await;
+
+            h_evals.push(self.get_wire(&h_eval));
+        }
+
+        // Interpolate h_evals to get h_poly_share
+        let h_poly_share = utils::interpolate_poly_over_mult_subgroup(&h_evals);
+
+        h_poly_share
     }
 
     /// TODO: HACK ALERT! make this a little more secure please!
