@@ -770,13 +770,13 @@ impl Evaluator {
         let c1 = self.exp_and_reveal_g1(
             vec![<Curve as Pairing>::G1Affine::generator()], 
             vec![mask_share_handle.clone()], 
-            &String::from("c1_".to_owned() + msg_share_handle + mask_share_handle)
+            &String::from("ibe_c1_".to_owned() + msg_share_handle + mask_share_handle)
         ).await;
         
         let c2 = self.exp_and_reveal_gt(
             vec![Gt::generator(), h.clone()], 
             vec![msg_share_handle.clone(), mask_share_handle.clone()], 
-            &String::from("c2".to_owned() + msg_share_handle + mask_share_handle)
+            &String::from("ibe_c2".to_owned() + msg_share_handle + mask_share_handle)
         ).await;
     
         (c1, c2)
