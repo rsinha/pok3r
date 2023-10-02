@@ -757,16 +757,7 @@ async fn encrypt_and_prove(
     let mut c1_is = vec![]; //vector of ciphertexts
     let mut c2_is = vec![]; //vector of ciphertexts
 
-    // Compute shares of plain quotient polynomial commitment
-    let mut pi_plain_vec = vec![]; //vector of plain non-reconstructed evaluation proofs
     let w = utils::multiplicative_subgroup_of_size(64);
-
-    for i in 0..64 {
-        let z = utils::compute_power(&w, i);
-        let pi_plain_i = evaluator.eval_proof(card_handles.clone(), z, format!("pi_plain_{}", i)).await;
-        pi_plain_vec.push(pi_plain_i);
-    }
-    
 
     for i in 0..64 {
         let (h_a, h_b, h_c) = evaluator.beaver().await;
@@ -802,11 +793,32 @@ async fn encrypt_and_prove(
 
         // TODO: batch this
         // Evaluation proofs of d_i at \omega^i to v_i 
-        // Currently computed by raising the plain eval proof shares to the power z_i and then reconstructing the group elements
 
-        let pi_i_share = pi_plain_vec[i].clone().mul(z_is[i].1).into_affine();
-        let pi_i = 
-            evaluator.add_g1_elements_from_all_parties(&pi_i_share, &format!("{}/{}", "enc_prove_pi_", i)).await;
+        // Compute eval vector for z_i * card_shares
+        let mut d_i_evals = vec![];
+
+        for j in 0..64 {
+            let (h_a, h_b, h_c) = evaluator.beaver().await;
+            let tmp = evaluator.mult(
+                &card_handles[j].clone(), 
+                &z_i.clone(), 
+                (&h_a, &h_b, &h_c)
+            ).await;
+
+            d_i_evals.push((tmp.clone(), evaluator.get_wire(&tmp)));
+        }
+
+        let d_i_poly_share = utils::interpolate_poly_over_mult_subgroup(
+            &d_i_evals.clone().into_iter().map(|x| x.1).collect()
+        );
+
+        // Compute eval_proof for d_i
+        let pi_i = evaluator.eval_proof_with_share_poly(
+            d_i_poly_share, 
+            utils::compute_power(&w, i as u64), 
+            format!("{}/{}", "enc_prove_pi_", i)
+        ).await;
+        
         pi_is.push(pi_i);
 
     }
@@ -878,8 +890,19 @@ async fn local_verify_encryption_proof(
         }
     }
 
-    // Check the sigma proof
+    // Check all the evaluation proofs
+    for i in 0..64 {
+        if utils::kzg_check(
+            &proof.masked_commitments[i], 
+            &utils::compute_power(&utils::multiplicative_subgroup_of_size(64), i as u64), 
+            &proof.masked_evals[i], 
+            &proof.eval_proofs[i]
+        ) == false {
+            return false;
+        }
+    }
 
+    // Check the sigma proof
     // Hash to obtain randomness for batching
     let s = utils::fs_hash(vec![&proof.to_bytes()], 64);
 
