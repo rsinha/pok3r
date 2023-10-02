@@ -1,4 +1,4 @@
-use std::{thread, collections::{HashMap, HashSet}, time::Duration, vec, ops::*};
+use std::{thread, collections::{HashMap, HashSet}, time::{Duration, Instant}, vec, ops::*};
 use ark_ec::{CurveGroup, AffineRepr, pairing::Pairing, Group};
 use ark_ff::Field;
 use ark_poly::{ GeneralEvaluationDomain, EvaluationDomain, Polynomial, univariate::{DensePolynomial, DenseOrSparsePolynomial}, DenseUVPolynomial};
@@ -105,19 +105,35 @@ async fn main() {
     test_share_poly_mult(&mut mpc).await;
 
     // KZG setup runs once
+    let s_setup = Instant::now();
     let pp = utils::setup_kzg(1024);
+    let t_setup = s_setup.elapsed();
+
+    println!("KZG setup time: {:?}", t_setup);
 
     // Actual protocol
+    let s_shuffle = Instant::now();
     let (card_share_handles, card_shares) = shuffle_deck(&mut mpc).await;
+    let t_shuffle = s_shuffle.elapsed();
+
+    println!("Shuffle time: {:?}", t_shuffle);
     
+    let s_perm = Instant::now();
     let perm_proof = compute_permutation_argument(
         &pp, 
         &mut mpc, 
         card_share_handles.clone(), 
         &card_shares
     ).await;
+    let t_perm = s_perm.elapsed();
 
+    println!("Permutation argument time: {:?}", t_perm);
+
+    let s_verify_perm = Instant::now();
     let verified = verify_permutation_argument(&pp, &perm_proof).await;
+    let t_verify_perm = s_verify_perm.elapsed();
+
+    println!("Permutation argument verification time: {:?}", t_verify_perm);
 
     if verified {
         println!("Permutation argument verified");
@@ -136,8 +152,25 @@ async fn main() {
         ids.push(id);
     }
 
-    let encrypt_proof = encrypt_and_prove(&pp, &mut mpc, card_share_handles.clone(), perm_proof.f_com, pk, ids).await;
+    // Encrypt and prove
+    let s_encrypt = Instant::now();
+    let encrypt_proof = encrypt_and_prove(
+        &pp, 
+        &mut mpc, 
+        card_share_handles.clone(), 
+        perm_proof.f_com, 
+        pk, 
+        ids
+    ).await;
+    let t_encrypt = s_encrypt.elapsed();
+
+    println!("Encryption time: {:?}", t_encrypt);
+    
+    let s_verify_encrypt = Instant::now();
     let verified = local_verify_encryption_proof(&pp, &encrypt_proof).await;
+    let t_verify_encrypt = s_verify_encrypt.elapsed();
+
+    println!("Encryption proof verification time: {:?}", t_verify_encrypt);
 
     if verified {
         println!("Encryption proof verified");
@@ -236,12 +269,12 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     // TODO - after batching, check that the length of card_share_values and handles are 64 and panic if not
 
 
-    // For printing purposes 
-    let card_mapping = map_roots_of_unity_to_cards();
-    for h_c in &card_share_handles {
-        let opened_card = evaluator.output_wire(&h_c).await;
-        println!("{}", card_mapping.get(&opened_card).unwrap());
-    }
+    // // For printing purposes 
+    // let card_mapping = map_roots_of_unity_to_cards();
+    // for h_c in &card_share_handles {
+    //     let opened_card = evaluator.output_wire(&h_c).await;
+    //     println!("{}", card_mapping.get(&opened_card).unwrap());
+    // }
 
     println!("-------------- Ending Pok3r shuffle -----------------");
     return (card_share_handles.clone(), card_share_values);
@@ -805,7 +838,7 @@ async fn encrypt_and_prove(
         v_is_reconstructed.push(evaluator.output_wire(&v_i).await);
 
         // TODO: batch this
-        // Evaluation proofs of d_i at \omega^i to v_i 
+        // Evaluation proofs of D_i at \omega^i to v_i 
 
         // Compute eval vector for z_i * card_shares
         let mut d_i_evals = vec![];
