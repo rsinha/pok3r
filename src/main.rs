@@ -24,6 +24,9 @@ use address_book::*;
 use evaluator::*;
 use common::*;
 
+const SET_SIZE: usize = 64;
+const NUM_CARDS: usize = 52;
+
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -196,18 +199,10 @@ fn map_roots_of_unity_to_cards() -> HashMap<F, String> {
         output.insert(ω_pow_i, card_name);
     }
 
-    // //and 12 jokers
-    // for i in 52..64 {
-    //     let ω_pow_i = utils::compute_power(&ω, i as u64);
-    //     output.insert(ω_pow_i, String::from("Joker"));
-    // }
-
     output
 }
 
 async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
-    println!("-------------- Starting Pok3r shuffle -----------------");
-
     //step 1: parties invoke F_RAN to obtain [sk]
     let sk = evaluator.ran();
 
@@ -267,16 +262,6 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     }
 
     // TODO - after batching, check that the length of card_share_values and handles are 64 and panic if not
-
-
-    // // For printing purposes 
-    // let card_mapping = map_roots_of_unity_to_cards();
-    // for h_c in &card_share_handles {
-    //     let opened_card = evaluator.output_wire(&h_c).await;
-    //     println!("{}", card_mapping.get(&opened_card).unwrap());
-    // }
-
-    println!("-------------- Ending Pok3r shuffle -----------------");
     return (card_share_handles.clone(), card_share_values);
 }
 
@@ -806,6 +791,8 @@ async fn encrypt_and_prove(
     let w = utils::multiplicative_subgroup_of_size(64);
 
     for i in 0..64 {
+        let loop_start_time = Instant::now();
+
         let (h_a, h_b, h_c) = evaluator.beaver().await;
 
         // Sample mask to be encrypted
@@ -868,6 +855,9 @@ async fn encrypt_and_prove(
         
         pi_is.push(pi_i);
 
+        println!("encrypt_and_prove loop duration: {:?}", 
+            loop_start_time.elapsed()
+        );
     }
 
     // Hash to obtain randomness for batching
@@ -886,17 +876,14 @@ async fn encrypt_and_prove(
     let s = utils::fs_hash(vec![&tmp_proof.to_bytes()], 64);
 
     // Compute batched pairing base for sigma proof
-    let mut e_batch = Gt::zero();
-
+    let mut batch_h = G1::zero();
     for i in 0..64 {
         // TODO: fix this. Need proper hash to curve
         let x_f = F::from(ids[i].clone());
         let hash_id = G1::generator().mul(x_f);
-
-        let h = <Curve as Pairing>::pairing(hash_id, pk);
-
-        e_batch = e_batch.add(h.mul(s[i]));
+        batch_h = batch_h.add(hash_id.mul(s[i])).into_affine();
     }
+    let e_batch = <Curve as Pairing>::pairing(batch_h, pk);
 
     let mut wit_1 = vec![];
     
