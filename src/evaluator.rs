@@ -15,6 +15,7 @@ use ark_std::io::Cursor;
 //use rand::{rngs::StdRng, SeedableRng};
 use sha2::{Sha256, Digest};
 use num_bigint::BigUint;
+use rand::{rngs::StdRng, SeedableRng};
 
 use crate::address_book::*;
 use crate::common::*;
@@ -305,7 +306,6 @@ impl Evaluator {
     pub async fn inv(&mut self, 
         handle_in: &String,
         handle_r: &String,
-        beaver_handles: (&String, &String, &String)
     ) -> String {
         // goal: compute inv([s])
         // step 1: invoke ran_p to obtain [r]
@@ -317,8 +317,7 @@ impl Evaluator {
         
         let handle_r_mult_s = self.mult(
             handle_in, 
-            handle_r, 
-            beaver_handles).await;
+            handle_r).await;
         //reconstruct the padded wires in the clear
         let r_mult_s = self.output_wire(&handle_r_mult_s).await;
 
@@ -376,19 +375,60 @@ impl Evaluator {
     /// outputs the wire label denoting [x.y]
     pub async fn mult(&mut self, 
         handle_x: &String, 
-        handle_y: &String,
-        beaver_handles: (&String, &String, &String)
+        handle_y: &String
     ) -> String {
-        //desugar the beaver triple handles
-        let (handle_a, handle_b, handle_c) = beaver_handles;
-        let share_a = self.get_wire(handle_a);
-        let share_b = self.get_wire(handle_b);
-        let share_c = self.get_wire(handle_c);
+        let (h_a, h_b, h_c) = self.beaver().await;
+
+        let share_a = self.get_wire(&h_a);
+        let share_b = self.get_wire(&h_b);
+        let share_c = self.get_wire(&h_c);
 
         // our strategy would be to re-use other components
         //construct adder gates for the padded wires
-        let handle_x_plus_a = self.add(handle_x, handle_a);
-        let handle_y_plus_b = self.add(handle_y, handle_b);
+        let handle_x_plus_a = self.add(handle_x, &h_a);
+        let handle_y_plus_b = self.add(handle_y, &h_b);
+
+        //reconstruct the padded wires in the clear
+        let x_plus_a = self.output_wire(&handle_x_plus_a).await;
+        let y_plus_b = self.output_wire(&handle_y_plus_b).await;
+
+        let handle = compute_2_input_gate_output_wire_id(
+            Gate::MULT, handle_x, handle_y);
+        
+        //only one party should add the constant term
+        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
+        let share_x_mul_y: F = match my_id {
+            0 => {
+                x_plus_a * y_plus_b 
+                - x_plus_a * share_b 
+                - y_plus_b * share_a 
+                + share_c
+            },
+            _ => {
+                F::from(0)
+                - x_plus_a * share_b 
+                - y_plus_b * share_a 
+                + share_c
+            }
+        };
+        self.wire_shares.insert(handle.clone(), share_x_mul_y);
+        handle
+    }
+
+    pub async fn batch_mult(&mut self, 
+        x_handles: &[String], 
+        y_handles: &[String]
+    ) -> String {
+        let (h_a, h_b, h_c) = self.beaver().await;
+
+        let share_a = self.get_wire(&h_a);
+        let share_b = self.get_wire(&h_b);
+        let share_c = self.get_wire(&h_c);
+
+        // our strategy would be to re-use other components
+        //construct adder gates for the padded wires
+        let handle_x_plus_a = self.add(handle_x, &h_a);
+        let handle_y_plus_b = self.add(handle_y, &h_b);
 
         //reconstruct the padded wires in the clear
         let x_plus_a = self.output_wire(&handle_x_plus_a).await;
@@ -473,11 +513,9 @@ impl Evaluator {
             let g_eval = self.share_poly_eval(g_poly_share.clone(), powers_of_alpha[i]).await;
 
             // Compute h_evals from f_evals and g_evals using Beaver mult
-            let (h_a, h_b, h_c) = self.beaver().await;
             let h_eval = self.mult(
                 &f_eval, 
-                &g_eval, 
-                (&h_a, &h_b, &h_c)
+                &g_eval
             ).await;
 
             h_evals.push(self.get_wire(&h_eval));
@@ -489,8 +527,47 @@ impl Evaluator {
         h_poly_share
     }
 
-    /// TODO: HACK ALERT! make this a little more secure please!
     pub async fn beaver(&mut self) -> (String, String, String) {
+        let n: usize = self.addr_book.len();
+        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
+
+        let gate_id = self.gate_counters.num_beaver;
+        self.gate_counters.num_beaver += 1;
+        let (handle_a, handle_b, handle_c) = compute_beaver_wire_ids(gate_id);
+
+        let mut seeded_rng = StdRng::from_seed([42u8; 32]);
+
+        let mut sum_a = F::from(0);
+        let mut sum_b = F::from(0);
+        let mut sum_c = F::from(0);
+
+        for i in 1..n {
+            let party_i_share_a =  F::rand(&mut seeded_rng);
+            let party_i_share_b =  F::rand(&mut seeded_rng);
+            let party_i_share_c =  F::rand(&mut seeded_rng);
+
+            sum_a += party_i_share_a;
+            sum_b += party_i_share_b;
+            sum_c += party_i_share_c;
+
+            if i == (my_id as usize) {
+                self.wire_shares.insert(handle_a.clone(), party_i_share_a);
+                self.wire_shares.insert(handle_b.clone(), party_i_share_b);
+                self.wire_shares.insert(handle_c.clone(), party_i_share_c);
+            }
+        }
+
+        if my_id == 0 {
+            self.wire_shares.insert(handle_a.clone(), F::from(0) - sum_a);
+            self.wire_shares.insert(handle_b.clone(), F::from(0) - sum_b);
+            self.wire_shares.insert(handle_c.clone(), F::from(0) - sum_c);
+        }
+
+        (handle_a, handle_b, handle_c)
+    }
+
+    /// TODO: HACK ALERT! make this a little more insecure please!
+    pub async fn beaver_slow(&mut self) -> (String, String, String) {
         let gate_id = self.gate_counters.num_beaver;
         self.gate_counters.num_beaver += 1;
 
@@ -691,11 +768,9 @@ impl Evaluator {
     pub async fn exp(&mut self, input_label: &String) -> String {
         let mut tmp = input_label.clone();
         for _i in 0..6 {
-            let (h_a, h_b, h_c) = self.beaver().await;
             tmp = self.mult(
                 &tmp, 
-                &tmp, 
-                (&h_a, &h_b, &h_c)
+                &tmp
             ).await;
         }
 
@@ -952,16 +1027,15 @@ pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
     assert_eq!(sum_r1_r2, r1 + r2);
 
     println!("testing multiplier...");
-    let h_mult_r1_r2 = evaluator.mult(&h_r1, &h_r2, (&h_a, &h_b, &h_c)).await;
+    let h_mult_r1_r2 = evaluator.mult(&h_r1, &h_r2).await;
     let mult_r1_r2 = evaluator.output_wire(&h_mult_r1_r2).await;
     assert_eq!(mult_r1_r2, r1 * r2);
 
     println!("testing inverter...");
-    let (h_a, h_b, h_c) = evaluator.beaver().await;
     let h_r3 = evaluator.ran();
     let h_r4 = evaluator.ran();
     let r3 = evaluator.output_wire(&h_r3).await;
-    let h_r3_inverted = evaluator.inv(&h_r3, &h_r4, (&h_a, &h_b, &h_c)).await;
+    let h_r3_inverted = evaluator.inv(&h_r3, &h_r4).await;
     let r3_inverted = evaluator.output_wire(&h_r3_inverted).await;
     assert_eq!(ark_bls12_377::Fr::from(1), r3 * r3_inverted);
 

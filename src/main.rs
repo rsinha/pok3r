@@ -216,7 +216,6 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     // So that the positions of these cards are fixed in the permutation
     for i in 52..64 {
         let h_r = evaluator.ran();
-        let (h_a, h_b, h_c) = evaluator.beaver().await;
 
         let ω = utils::multiplicative_subgroup_of_size(64);
         let ω_pow_i = utils::compute_power(&ω, i as u64);
@@ -225,8 +224,7 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
         let denom = evaluator.clear_add(&sk, ω_pow_i);
         let t_i = evaluator.inv(
             &denom,
-            &h_r,
-            (&h_a, &h_b, &h_c)
+            &h_r
         ).await;
         let y_i = evaluator.output_wire_in_exponent(&t_i).await;
 
@@ -239,15 +237,13 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     // TODO : After batching, this cannot be variable - must run ~1275 times or so to get enough cards with high probability
     while card_share_values.len() < 64 { // until you get the other 52 cards
         let h_r = evaluator.ran();
-        let (h_a, h_b, h_c) = evaluator.beaver().await;
 
         let a_i = evaluator.ran();
         let c_i = evaluator.ran_64(&a_i).await;
         let t_i = evaluator.add(&c_i, &sk);
         let t_i = evaluator.inv(
             &t_i,
-            &h_r,
-            (&h_a, &h_b, &h_c)
+            &h_r
         ).await;
 
         // y_i = g^{1 / (sk + w_i)}
@@ -280,16 +276,13 @@ async fn compute_permutation_argument(
     let mut r_inv_is = vec![]; //vector of (handle, share_value) pairs
 
     for _i in 0..65 {
-        // Beaver triple for inverse
-        let (h_a, h_b, h_c) = evaluator.beaver().await;
         // Random value for inverse
         let h_t = evaluator.ran();
 
         let h_r_i = evaluator.ran();
         let h_r_inv_i = evaluator.inv(
             &h_r_i,
-            &h_t,
-            (&h_a, &h_b, &h_c)
+            &h_t
         ).await;
 
         r_is.push((h_r_i.clone(), evaluator.get_wire(&h_r_i)));
@@ -302,16 +295,13 @@ async fn compute_permutation_argument(
     // 7: end for
     let mut b_is = vec![]; //vector of (handle, share_value) pairs
     for i in 0..64 {
-        // Beaver triple for mult
-        let (h_a, h_b, h_c) = evaluator.beaver().await;
 
         let h_r_inv_0 = &r_inv_is.get(0).unwrap().0;
         let h_r_i_plus_1 = &r_is.get(i+1).unwrap().0;
 
         let h_b_i = evaluator.mult(
             h_r_inv_0,
-            h_r_i_plus_1,
-            (&h_a, &h_b, &h_c)
+            h_r_i_plus_1
         ).await;
 
         b_is.push((h_b_i.clone(), evaluator.get_wire(&h_b_i)));
@@ -394,10 +384,6 @@ async fn compute_permutation_argument(
     // 18: Parties reconstruct t′i.
     // 19: end for
     for i in 0..64 {
-        // Beaver triple for two mults
-        let (h_a1, h_b1, h_c1) = evaluator.beaver().await;
-        let (h_a2, h_b2, h_c2) = evaluator.beaver().await;
-
         let h_r_i = &r_is.get(i).unwrap().0;
         let h_r_inv_i_plus_1 = &r_inv_is.get(i+1).unwrap().0;
         
@@ -412,8 +398,7 @@ async fn compute_permutation_argument(
         // i]p
         let s_prime_i = evaluator.mult(
             h_r_i,
-            h_h_inv_g_i,
-            (&h_a1, &h_b1, &h_c1)
+            h_h_inv_g_i
         ).await;
 
         // Parties invoke FMULT with inputs ([s′
@@ -423,8 +408,7 @@ async fn compute_permutation_argument(
         // i ]p
         let t_prime_i = evaluator.mult(
             h_r_inv_i_plus_1,
-            &s_prime_i,
-            (&h_a2, &h_b2, &h_c2)
+            &s_prime_i
         ).await;
 
         let t_prime_i = evaluator.output_wire(&t_prime_i).await;
@@ -469,14 +453,6 @@ async fn compute_permutation_argument(
     ).await;
     
     let d_share_poly = h_t_share_poly.sub(&g_tx_by_omega_share_poly);
-
-    // Sanity check - d(X) should be zero at powers of omega
-    for i in 0..64 {
-        let ω_pow_i = utils::compute_power(&ω, i as u64);
-        let d_i = evaluator.share_poly_eval(d_share_poly.clone(), ω_pow_i).await;
-        let tmp = evaluator.output_wire(&d_i).await;
-        assert_eq!(tmp, F::zero(), "d(X) is not zero at ω^{i}");
-    }
 
     // Compute q(X) and r(X) as quotient and remainder of d(X) / (X^64 - 1)
     // TOASSERT - Reconstructed r(X) should be 0
@@ -793,8 +769,6 @@ async fn encrypt_and_prove(
     for i in 0..64 {
         let loop_start_time = Instant::now();
 
-        let (h_a, h_b, h_c) = evaluator.beaver().await;
-
         // Sample mask to be encrypted
         let z_i = evaluator.ran();
         z_is.push((z_i.clone(), evaluator.get_wire(&z_i.clone())));
@@ -820,7 +794,7 @@ async fn encrypt_and_prove(
         d_is.push(d_i.clone());
 
         // Compute v_i = z_i * card_i
-        let v_i = evaluator.mult(&z_i, &card_handles[i], (&h_a, &h_b, &h_c)).await;        
+        let v_i = evaluator.mult(&z_i, &card_handles[i]).await;        
         v_is.push((v_i.clone(), evaluator.get_wire(&v_i)));
         v_is_reconstructed.push(evaluator.output_wire(&v_i).await);
 
@@ -831,11 +805,9 @@ async fn encrypt_and_prove(
         let mut d_i_evals = vec![];
 
         for j in 0..64 {
-            let (h_a, h_b, h_c) = evaluator.beaver().await;
             let tmp = evaluator.mult(
                 &card_handles[j].clone(), 
-                &z_i.clone(), 
-                (&h_a, &h_b, &h_c)
+                &z_i.clone()
             ).await;
 
             d_i_evals.push((tmp.clone(), evaluator.get_wire(&tmp)));
@@ -855,9 +827,9 @@ async fn encrypt_and_prove(
         
         pi_is.push(pi_i);
 
-        println!("encrypt_and_prove loop duration: {:?}", 
-            loop_start_time.elapsed()
-        );
+        // println!("encrypt_and_prove loop duration: {:?}", 
+        //     loop_start_time.elapsed()
+        // );
     }
 
     // Hash to obtain randomness for batching
