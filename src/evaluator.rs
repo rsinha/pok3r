@@ -415,47 +415,47 @@ impl Evaluator {
         handle
     }
 
-    pub async fn batch_mult(&mut self, 
-        x_handles: &[String], 
-        y_handles: &[String]
-    ) -> String {
-        let (h_a, h_b, h_c) = self.beaver().await;
+    // pub async fn batch_mult(&mut self, 
+    //     x_handles: &[String], 
+    //     y_handles: &[String]
+    // ) -> String {
+    //     let (h_a, h_b, h_c) = self.beaver().await;
 
-        let share_a = self.get_wire(&h_a);
-        let share_b = self.get_wire(&h_b);
-        let share_c = self.get_wire(&h_c);
+    //     let share_a = self.get_wire(&h_a);
+    //     let share_b = self.get_wire(&h_b);
+    //     let share_c = self.get_wire(&h_c);
 
-        // our strategy would be to re-use other components
-        //construct adder gates for the padded wires
-        let handle_x_plus_a = self.add(handle_x, &h_a);
-        let handle_y_plus_b = self.add(handle_y, &h_b);
+    //     // our strategy would be to re-use other components
+    //     //construct adder gates for the padded wires
+    //     let handle_x_plus_a = self.add(handle_x, &h_a);
+    //     let handle_y_plus_b = self.add(handle_y, &h_b);
 
-        //reconstruct the padded wires in the clear
-        let x_plus_a = self.output_wire(&handle_x_plus_a).await;
-        let y_plus_b = self.output_wire(&handle_y_plus_b).await;
+    //     //reconstruct the padded wires in the clear
+    //     let x_plus_a = self.output_wire(&handle_x_plus_a).await;
+    //     let y_plus_b = self.output_wire(&handle_y_plus_b).await;
 
-        let handle = compute_2_input_gate_output_wire_id(
-            Gate::MULT, handle_x, handle_y);
+    //     let handle = compute_2_input_gate_output_wire_id(
+    //         Gate::MULT, handle_x, handle_y);
         
-        //only one party should add the constant term
-        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
-        let share_x_mul_y: F = match my_id {
-            0 => {
-                x_plus_a * y_plus_b 
-                - x_plus_a * share_b 
-                - y_plus_b * share_a 
-                + share_c
-            },
-            _ => {
-                F::from(0)
-                - x_plus_a * share_b 
-                - y_plus_b * share_a 
-                + share_c
-            }
-        };
-        self.wire_shares.insert(handle.clone(), share_x_mul_y);
-        handle
-    }
+    //     //only one party should add the constant term
+    //     let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
+    //     let share_x_mul_y: F = match my_id {
+    //         0 => {
+    //             x_plus_a * y_plus_b 
+    //             - x_plus_a * share_b 
+    //             - y_plus_b * share_a 
+    //             + share_c
+    //         },
+    //         _ => {
+    //             F::from(0)
+    //             - x_plus_a * share_b 
+    //             - y_plus_b * share_a 
+    //             + share_c
+    //         }
+    //     };
+    //     self.wire_shares.insert(handle.clone(), share_x_mul_y);
+    //     handle
+    // }
 
     pub async fn fixed_wire_handle(&mut self, value: F) -> String {
         let handle = compute_fixed_wire_id(value);
