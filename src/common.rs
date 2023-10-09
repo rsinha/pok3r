@@ -15,6 +15,11 @@ pub enum EvalNetMsg {
         handle: String,
         value: String
     },
+    PublishBatchValue { 
+        sender: String,
+        handles: Vec<String>,
+        values: Vec<String>
+    },
     SendTriple { 
         sender: String, 
         receiver: String, 

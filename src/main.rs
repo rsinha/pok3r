@@ -804,6 +804,7 @@ async fn encrypt_and_prove(
         // Compute eval vector for z_i * card_shares
         let mut d_i_evals = vec![];
 
+        //TODO: Rohit -- replace wit batch
         for j in 0..64 {
             let tmp = evaluator.mult(
                 &card_handles[j].clone(), 

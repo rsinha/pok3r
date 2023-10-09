@@ -29,146 +29,6 @@ pub type G1 = <Curve as Pairing>::G1Affine;
 pub type G2 = <Curve as Pairing>::G2Affine;
 pub type Gt = PairingOutput<Curve>;
 
-pub enum Gate {
-    BEAVER = 1, // denotes a beaver triple source gate that is output by pre-processing
-    RAN = 2, // denotes a random gate that is the output of the pre-processing stage
-    ADD = 3, // denotes an adder over 2 input wires
-    MULT = 4, // denotes a multiplier over 2 input wires
-    INV = 5, // denotes an inversion gate
-    EXP = 6, // denotes an exponentiation (by 64) gate
-    SCALE = 7, // denotes a scaling gate
-    CLEARADD = 8, // denotes a addition gate for one input in clear and another shared
-    FIXED = 9, // denotes a fixed value that is shared
-    //OUTPUT = 5 // denotes an output gate that all parties observe in the clear
-}
-
-
-// outputs H(gate_type || gate_id) as a base-58 encoded string, 
-// which is a handle we use to refer to gate output wires
-// note to developer: ensure distinct gates have distinct gate_ids
-// technically, we just need uniqueness amongst gates of the same type
-fn compute_beaver_wire_ids(gate_id: u64) -> (String, String, String)
-{
-    let mut hasher_input = Vec::new();
-    hasher_input.extend_from_slice(&(Gate::BEAVER as u64).to_be_bytes());
-    hasher_input.extend_from_slice(&gate_id.to_be_bytes());
-    hasher_input.extend_from_slice(&(1 as u64).to_be_bytes());
-    let mut hasher = Sha256::new();
-    hasher.update(&hasher_input);
-    let hash = hasher.finalize();
-    let a = bs58::encode(hash).into_string();
-
-    let mut hasher_input = Vec::new();
-    hasher_input.extend_from_slice(&(Gate::BEAVER as u64).to_be_bytes());
-    hasher_input.extend_from_slice(&gate_id.to_be_bytes());
-    hasher_input.extend_from_slice(&(2 as u64).to_be_bytes());
-    let mut hasher = Sha256::new();
-    hasher.update(&hasher_input);
-    let hash = hasher.finalize();
-    let b = bs58::encode(hash).into_string();
-
-    let mut hasher_input = Vec::new();
-    hasher_input.extend_from_slice(&(Gate::BEAVER as u64).to_be_bytes());
-    hasher_input.extend_from_slice(&gate_id.to_be_bytes());
-    hasher_input.extend_from_slice(&(3 as u64).to_be_bytes());
-    let mut hasher = Sha256::new();
-    hasher.update(&hasher_input);
-    let hash = hasher.finalize();
-    let c = bs58::encode(hash).into_string();
-
-    (a,b,c)
-}
-
-fn compute_ran_input_wire_id(gate_id: u64) -> String {
-    //gate_id denotes a unique identifier for this gate
-    let mut hasher_input = Vec::new();
-    hasher_input.extend_from_slice(&(Gate::RAN as u64).to_be_bytes());
-    hasher_input.extend_from_slice(&gate_id.to_be_bytes());
-
-    let mut hasher = Sha256::new();
-    hasher.update(&hasher_input);
-    let hash = hasher.finalize();
-
-    bs58::encode(hash).into_string()
-}
-
-fn compute_fixed_wire_id(value: F) -> String {
-    let mut hasher_input = Vec::new();
-    hasher_input.extend_from_slice(&(Gate::FIXED as u64).to_be_bytes());
-
-    let mut value_bytes = Vec::new();
-    value.serialize_uncompressed(&mut value_bytes).unwrap();
-    hasher_input.extend_from_slice(&value_bytes);
-
-    let mut hasher = Sha256::new();
-    hasher.update(&hasher_input);
-    let hash = hasher.finalize();
-
-    bs58::encode(hash).into_string()
-}
-
-fn compute_scale_wire_id(gate_id: u64) -> String {
-    let mut hasher_input = Vec::new();
-    hasher_input.extend_from_slice(&(Gate::SCALE as u64).to_be_bytes());
-    hasher_input.extend_from_slice(&gate_id.to_be_bytes());
-
-    let mut hasher = Sha256::new();
-    hasher.update(&hasher_input);
-    let hash = hasher.finalize();
-
-    bs58::encode(hash).into_string()
-}
-
-fn compute_clear_add_wire_id(gate_id: u64) -> String {
-    let mut hasher_input = Vec::new();
-    hasher_input.extend_from_slice(&(Gate::CLEARADD as u64).to_be_bytes());
-    hasher_input.extend_from_slice(&gate_id.to_be_bytes());
-
-    let mut hasher = Sha256::new();
-    hasher.update(&hasher_input);
-    let hash = hasher.finalize();
-
-    bs58::encode(hash).into_string()
-}
-
-fn compute_inversion_wire_id(x: &String) -> String {
-    let mut hasher_input = Vec::new();
-    hasher_input.extend_from_slice(&(Gate::INV as u64).to_be_bytes());
-    hasher_input.extend_from_slice(x.as_bytes());
-
-    let mut hasher = Sha256::new();
-    hasher.update(&hasher_input);
-    let hash = hasher.finalize();
-
-    bs58::encode(hash).into_string()
-}
-
-fn compute_exp_wire_id(x: &String) -> String {
-    let mut hasher_input = Vec::new();
-    hasher_input.extend_from_slice(&(Gate::EXP as u64).to_be_bytes());
-    hasher_input.extend_from_slice(x.as_bytes());
-
-    let mut hasher = Sha256::new();
-    hasher.update(&hasher_input);
-    let hash = hasher.finalize();
-
-    bs58::encode(hash).into_string()
-}
-
-fn compute_2_input_gate_output_wire_id(
-    gate_type: Gate, x: &String, y: &String) -> String {
-    let mut hasher_input = Vec::new();
-    hasher_input.extend_from_slice(&(gate_type as u64).to_be_bytes());
-    hasher_input.extend_from_slice(x.as_bytes());
-    hasher_input.extend_from_slice(y.as_bytes());
-
-    let mut hasher = Sha256::new();
-    hasher.update(&hasher_input);
-    let hash = hasher.finalize();
-
-    bs58::encode(hash).into_string()
-}
-
 macro_rules! send_over_network {
     ($msg:expr, $tx:expr) => {
         let r = $tx.send($msg).await;
@@ -178,12 +38,6 @@ macro_rules! send_over_network {
     };
 }
 
-pub struct GateCount {
-    num_beaver: u64,
-    num_ran: u64,
-    num_scale: u64,
-    num_clear_add: u64
-}
 
 pub struct Evaluator {
     /// local peer id
@@ -199,7 +53,7 @@ pub struct Evaluator {
     /// stores incoming messages indexed by identifier and then by peer id
     mailbox: HashMap<String, HashMap<String, String>>,
     /// keep track of gates
-    gate_counters: GateCount
+    gate_counter: u64
 }
 
 impl Evaluator {
@@ -233,7 +87,7 @@ impl Evaluator {
             rx,
             wire_shares: HashMap::new(),
             mailbox: HashMap::new(),
-            gate_counters: GateCount { num_beaver: 0, num_ran: 0, num_scale: 0, num_clear_add: 0 }
+            gate_counter: 0
         }
     }
 
@@ -252,25 +106,34 @@ impl Evaluator {
         }
     }
 
+    fn compute_fresh_wire_label(&mut self) -> String {
+        self.gate_counter += 1;
+
+        //gate_id denotes a unique identifier for this gate
+        let mut hasher_input = Vec::new();
+        hasher_input.extend_from_slice(&self.gate_counter.to_be_bytes());
+    
+        let mut hasher = Sha256::new();
+        hasher.update(&hasher_input);
+        let hash = hasher.finalize();
+    
+        bs58::encode(hash).into_string()
+    }
+    
+
     /// asks the pre-processor to generate an additive sharing of a random value
     /// returns a string handle, which can be used to access the share in future
     pub fn ran(&mut self) -> String {
-        let gate_id = self.gate_counters.num_ran;
-        self.gate_counters.num_ran += 1;
-
         let r = F::rand(&mut rand::thread_rng());
 
-        let handle = compute_ran_input_wire_id(gate_id);
+        let handle = self.compute_fresh_wire_label();
         self.wire_shares.insert(handle.clone(), r);
         handle
     }
 
     /// returns shares of a random element in {1, ω, ..., ω^63}
     pub async fn ran_64(&mut self, h_a: &String) -> String {
-        // we will cheat a bit and use the same gate type
-        let gate_id = self.gate_counters.num_ran;
-        self.gate_counters.num_ran += 1;
-        let h_c = compute_ran_input_wire_id(gate_id);
+        let h_c =  self.compute_fresh_wire_label();
 
         let h_a_exp_64 = self.exp(h_a).await;
         let a_exp_64 = self.output_wire(&h_a_exp_64).await;
@@ -293,8 +156,7 @@ impl Evaluator {
     pub fn add(&mut self, 
         handle_x: &String, 
         handle_y: &String) -> String {
-        let handle = compute_2_input_gate_output_wire_id(
-            Gate::ADD, handle_x, handle_y);
+        let handle =  self.compute_fresh_wire_label();
 
         let share_x = self.get_wire(handle_x);
         let share_y = self.get_wire(handle_y);
@@ -313,7 +175,7 @@ impl Evaluator {
         // step 3: reconstruct q = r . s
         // step 4: return [r] / q
         
-        let handle_out = compute_inversion_wire_id(handle_in);
+        let handle_out = self.compute_fresh_wire_label();
         
         let handle_r_mult_s = self.mult(
             handle_in, 
@@ -334,10 +196,7 @@ impl Evaluator {
         handle_x: &String,
         y: F
     ) -> String {
-        let gate_id = self.gate_counters.num_clear_add;
-        self.gate_counters.num_clear_add += 1;
-
-        let handle_out = compute_clear_add_wire_id(gate_id);
+        let handle_out = self.compute_fresh_wire_label();
 
         let x = self.get_wire(&handle_x);
 
@@ -357,10 +216,7 @@ impl Evaluator {
         handle_in: &String, 
         scalar: F
     ) -> String {
-        let gate_id = self.gate_counters.num_scale;
-        self.gate_counters.num_scale += 1;
-
-        let handle_out = compute_scale_wire_id(gate_id);
+        let handle_out = self.compute_fresh_wire_label();
 
         let x = self.get_wire(handle_in);
 
@@ -392,8 +248,7 @@ impl Evaluator {
         let x_plus_a = self.output_wire(&handle_x_plus_a).await;
         let y_plus_b = self.output_wire(&handle_y_plus_b).await;
 
-        let handle = compute_2_input_gate_output_wire_id(
-            Gate::MULT, handle_x, handle_y);
+        let handle = self.compute_fresh_wire_label();
         
         //only one party should add the constant term
         let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
@@ -419,46 +274,24 @@ impl Evaluator {
     //     x_handles: &[String], 
     //     y_handles: &[String]
     // ) -> String {
-    //     let (h_a, h_b, h_c) = self.beaver().await;
 
-    //     let share_a = self.get_wire(&h_a);
-    //     let share_b = self.get_wire(&h_b);
-    //     let share_c = self.get_wire(&h_c);
+    //     assert_eq!(x_handles.len(), y_handles.len());
+    //     let len: usize = x_handles.len();
 
-    //     // our strategy would be to re-use other components
-    //     //construct adder gates for the padded wires
-    //     let handle_x_plus_a = self.add(handle_x, &h_a);
-    //     let handle_y_plus_b = self.add(handle_y, &h_b);
+    //     for i in 0..len {
+    //         let (h_a, h_b, h_c) = self.beaver().await;
 
-    //     //reconstruct the padded wires in the clear
-    //     let x_plus_a = self.output_wire(&handle_x_plus_a).await;
-    //     let y_plus_b = self.output_wire(&handle_y_plus_b).await;
+    //         let share_a = self.get_wire(&h_a);
+    //         let share_b = self.get_wire(&h_b);
+    //         let share_c = self.get_wire(&h_c);
 
-    //     let handle = compute_2_input_gate_output_wire_id(
-    //         Gate::MULT, handle_x, handle_y);
-        
-    //     //only one party should add the constant term
-    //     let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
-    //     let share_x_mul_y: F = match my_id {
-    //         0 => {
-    //             x_plus_a * y_plus_b 
-    //             - x_plus_a * share_b 
-    //             - y_plus_b * share_a 
-    //             + share_c
-    //         },
-    //         _ => {
-    //             F::from(0)
-    //             - x_plus_a * share_b 
-    //             - y_plus_b * share_a 
-    //             + share_c
-    //         }
-    //     };
-    //     self.wire_shares.insert(handle.clone(), share_x_mul_y);
-    //     handle
+    //         let handle_x_plus_a = self.add(&x_handles[i], &h_a);
+    //         let handle_y_plus_b = self.add(&y_handles[i], &h_b);
+    //     }
     // }
 
     pub async fn fixed_wire_handle(&mut self, value: F) -> String {
-        let handle = compute_fixed_wire_id(value);
+        let handle = self.compute_fresh_wire_label();
         
         let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
         let share: F = match my_id {
@@ -476,12 +309,7 @@ impl Evaluator {
         x: F,
      ) -> String {
 
-        // Hijacking the scale gate to compute f(x)
-        let gate_id = self.gate_counters.num_scale;
-        self.gate_counters.num_scale += 1;
-
-        let handle_out = compute_scale_wire_id(gate_id);
-
+        let handle_out = self.compute_fresh_wire_label();
 
         let mut sum = F::zero();
         let mut x_pow = F::one();
@@ -531,9 +359,9 @@ impl Evaluator {
         let n: usize = self.addr_book.len();
         let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
 
-        let gate_id = self.gate_counters.num_beaver;
-        self.gate_counters.num_beaver += 1;
-        let (handle_a, handle_b, handle_c) = compute_beaver_wire_ids(gate_id);
+        let handle_a = self.compute_fresh_wire_label();
+        let handle_b = self.compute_fresh_wire_label();
+        let handle_c = self.compute_fresh_wire_label();
 
         let mut seeded_rng = StdRng::from_seed([42u8; 32]);
 
@@ -566,80 +394,6 @@ impl Evaluator {
         (handle_a, handle_b, handle_c)
     }
 
-    /// TODO: HACK ALERT! make this a little more insecure please!
-    pub async fn beaver_slow(&mut self) -> (String, String, String) {
-        let gate_id = self.gate_counters.num_beaver;
-        self.gate_counters.num_beaver += 1;
-
-        let (handle_a, handle_b, handle_c) = compute_beaver_wire_ids(gate_id);
-
-        //only one party will be responsible for generating this
-        let n: usize = self.addr_book.len();
-        let designated_generator = gate_id % (n as u64);
-        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
-
-        // I am designated generator
-        if my_id == designated_generator {
-            //generate random a, b, c
-            let a = F::rand(&mut rand::thread_rng());
-            let b = F::rand(&mut rand::thread_rng());
-            let c = a * b;
-            assert_eq!(c, a * b);
-
-            let shares_a = utils::compute_additive_shares(&a, n);
-            let shares_b = utils::compute_additive_shares(&b, n);
-            let shares_c = utils::compute_additive_shares(&c, n);
-            
-            //deal shares of a, b, c for all parties
-            for peer_id in self.addr_book.keys() {
-
-                let node_id = get_node_id_via_peer_id(
-                    &self.addr_book, 
-                    &peer_id
-                ).unwrap() as usize;
-
-                let a_i = shares_a.get(node_id).unwrap();
-                let b_i = shares_b.get(node_id).unwrap();
-                let c_i = shares_c.get(node_id).unwrap();
-
-                // distribute shares to all other parties
-                if ! self.id.eq(peer_id) {
-                    let msg = EvalNetMsg::SendTriple {
-                        sender: self.id.clone(),
-                        receiver: peer_id.clone(),
-                        handle_a: handle_a.clone(),
-                        share_a: encode_f_as_bs58_str(&a_i),
-                        handle_b: handle_b.clone(),
-                        share_b: encode_f_as_bs58_str(&b_i),
-                        handle_c: handle_c.clone(),
-                        share_c: encode_f_as_bs58_str(&c_i),
-                    };
-                    send_over_network!(msg, self.tx);
-                } else { // self.id.eq(peer_id)
-                    self.wire_shares.insert(handle_a.clone(), *a_i);
-                    self.wire_shares.insert(handle_b.clone(), *b_i);
-                    self.wire_shares.insert(handle_c.clone(), *c_i);
-                }
-            }
-        } else { // I am not designated, so just receive shares
-            loop {
-                if self.exists_in_wire_shares(
-                    vec![
-                        handle_a.clone(), 
-                        handle_b.clone(), 
-                        handle_c.clone()
-                        ]) {
-                    break;
-                }
-                
-                let msg: EvalNetMsg = self.rx.select_next_some().await;
-                self.process_next_message(&msg);
-            }
-        }
-
-        return (handle_a, handle_b, handle_c)
-    }
-
     pub async fn output_wire(&mut self, wire_handle: &String) -> F {
         let my_share = self.get_wire(wire_handle);
 
@@ -659,6 +413,45 @@ impl Evaluator {
         let mut sum: F = my_share;
         for v in incoming_values { sum += v; }
         sum
+    }
+
+    /*
+     * outputs the reconstructed value of all wires
+     */
+    pub async fn batch_output_wire(&mut self, wire_handles: &[String]) -> HashMap<String, F> {
+        let mut outputs = HashMap::new();
+
+        let mut handles = Vec::new();
+        let mut values = Vec::new();
+
+        let len = wire_handles.len();
+
+        for i in 0..len {
+            handles.push(wire_handles[i].clone());
+            values.push(encode_f_as_bs58_str(&self.get_wire(&wire_handles[i])));
+        }
+
+        let msg = EvalNetMsg::PublishBatchValue {
+            sender: self.id.clone(),
+            handles: handles,
+            values: values,
+        };
+        send_over_network!(msg, self.tx);
+
+        for i in 0..len {
+            let incoming_msgs = self.collect_messages_from_all_peers(&wire_handles[i]).await;
+            let incoming_values: Vec<F> = incoming_msgs
+                .into_iter()
+                .map(|x| decode_bs58_str_as_f(&x))
+                .collect();
+
+            let mut sum: F = self.get_wire(&wire_handles[i]);
+            for v in incoming_values { sum += v; }
+
+            outputs.insert(wire_handles[i].clone(), sum);
+        }
+
+        outputs
     }
 
     // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
@@ -774,7 +567,7 @@ impl Evaluator {
             ).await;
         }
 
-        let handle = compute_exp_wire_id(input_label);
+        let handle = self.compute_fresh_wire_label();
         self.wire_shares.insert(handle.clone(), self.get_wire(&tmp));
         handle
     }
@@ -899,25 +692,44 @@ impl Evaluator {
                 handle,
                 value
             } => {
-                // if already exists, then ignore
-                if self.mailbox.contains_key(handle) {
-                    let sender_exists_for_handle = self.mailbox
-                        .get(handle)
-                        .unwrap()
-                        .contains_key(sender);
-                    if sender_exists_for_handle { return; } //ignore duplicate msg!
-                } else {
-                    //mailbox never got a message by this handle so lets make room for it
-                    self.mailbox.insert(handle.clone(), HashMap::new());
-                }
+                self.accept_handle_and_value_from_sender(sender, handle, value);
+            },
+            EvalNetMsg::PublishBatchValue { 
+                sender,
+                handles,
+                values
+            } => {
+                assert_eq!(handles.len(), values.len());
 
-                self.mailbox
-                    .get_mut(handle)
-                    .unwrap()
-                    .insert(sender.clone(), value.clone());
+                for (h,v) in handles.iter().zip(values.iter()) {
+                    self.accept_handle_and_value_from_sender(sender, h, v);
+                }
             },
             _ => return,
         }
+    }
+
+    fn accept_handle_and_value_from_sender(&mut self, 
+        sender: &String, 
+        handle: &String, 
+        value: &String
+    ) {
+        // if already exists, then ignore
+        if self.mailbox.contains_key(handle) {
+            let sender_exists_for_handle = self.mailbox
+                .get(handle)
+                .unwrap()
+                .contains_key(sender);
+            if sender_exists_for_handle { return; } //ignore duplicate msg!
+        } else {
+            //mailbox never got a message by this handle so lets make room for it
+            self.mailbox.insert(handle.clone(), HashMap::new());
+        }
+
+        self.mailbox
+            .get_mut(handle)
+            .unwrap()
+            .insert(sender.clone(), value.clone());
     }
 
     fn exists_in_wire_shares(&self, handles: Vec<String>) -> bool {
@@ -1025,6 +837,30 @@ pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
     let h_sum_r1_r2 = evaluator.add(&h_r1, &h_r2);
     let sum_r1_r2 = evaluator.output_wire(&h_sum_r1_r2).await;
     assert_eq!(sum_r1_r2, r1 + r2);
+
+    println!("testing batch output wire...");
+    let mut a_handles = Vec::new();
+    let mut b_handles = Vec::new();
+    let mut c_handles = Vec::new();
+
+    for _i in 0..5 {
+        let (h_a, h_b, h_c) = evaluator.beaver().await;
+
+        a_handles.push(h_a);
+        b_handles.push(h_b);
+        c_handles.push(h_c);
+    }
+    let reconstructed_a = evaluator.batch_output_wire(&a_handles).await;
+    let reconstructed_b = evaluator.batch_output_wire(&b_handles).await;
+    let reconstructed_c = evaluator.batch_output_wire(&c_handles).await;
+    for i in 0..5 {
+        let a = reconstructed_a.get(&a_handles[i]).unwrap();
+        let b = reconstructed_b.get(&b_handles[i]).unwrap();
+        let c = reconstructed_c.get(&c_handles[i]).unwrap();
+
+        assert_eq!(*c, (*a) * (*b));
+    }
+
 
     println!("testing multiplier...");
     let h_mult_r1_r2 = evaluator.mult(&h_r1, &h_r2).await;
