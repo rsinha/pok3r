@@ -191,6 +191,41 @@ impl Evaluator {
         handle_out
     }
 
+    pub async fn batch_inv(&mut self, 
+        input_handles: &[String]
+    ) -> Vec<String> {
+        // goal: compute inv([s])
+        // step 1: invoke ran_p to obtain [r]
+        // step 2: invoke mult to get [q] = [r . s]
+        // step 3: reconstruct q = r . s
+        // step 4: return [r] / q
+        
+        let rand_handles: Vec<String> = (0..input_handles.len())
+            .into_iter()
+            .map(|_| self.ran())
+            .collect();
+
+        let masked_handles = self.batch_mult(
+            input_handles, 
+            &rand_handles
+        ).await;
+        
+        let masked_values = self.batch_output_wire(&masked_handles).await;
+
+        let mut output: Vec<String> = vec![];
+        for i in 0..input_handles.len() {
+            let q_inv = F::from(1) / masked_values[i];
+            let wire_out = q_inv * self.get_wire(&rand_handles[i]);
+
+            let handle_out = self.compute_fresh_wire_label();
+            self.wire_shares.insert(handle_out.clone(), wire_out);
+
+            output.push(handle_out);
+        }
+
+        output
+    }
+
     // Adds [x] to y in the clear and outputs handle to the resulting share
     pub fn clear_add(&mut self,
         handle_x: &String,
@@ -946,6 +981,18 @@ pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
     let h_r3_inverted = evaluator.inv(&h_r3).await;
     let r3_inverted = evaluator.output_wire(&h_r3_inverted).await;
     assert_eq!(ark_bls12_377::Fr::from(1), r3 * r3_inverted);
+
+    println!("testing batch inverter...");
+    let xs_handles: Vec<String> = (0..5)
+            .into_iter()
+            .map(|_| evaluator.ran())
+            .collect();
+    let inv_xs_handles = evaluator.batch_inv(&xs_handles).await;
+    for i in 0..5 {
+        let x = evaluator.output_wire(&xs_handles[i]).await;
+        let inv_x = evaluator.output_wire(&inv_xs_handles[i]).await;
+        assert_eq!(ark_bls12_377::Fr::from(1), x * inv_x);
+    }
 
     println!("testing exponentiator...");
     let h_r = evaluator.ran();
