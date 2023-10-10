@@ -270,25 +270,71 @@ impl Evaluator {
         handle
     }
 
-    // pub async fn batch_mult(&mut self, 
-    //     x_handles: &[String], 
-    //     y_handles: &[String]
-    // ) -> String {
+    pub async fn batch_mult(&mut self, 
+        x_handles: &[String], 
+        y_handles: &[String]
+    ) -> Vec<String> {
 
-    //     assert_eq!(x_handles.len(), y_handles.len());
-    //     let len: usize = x_handles.len();
+        assert_eq!(x_handles.len(), y_handles.len());
+        let len: usize = x_handles.len();
 
-    //     for i in 0..len {
-    //         let (h_a, h_b, h_c) = self.beaver().await;
+        // store all beaver triples for use later in this function
+        let mut bookkeeping_a: Vec<F> = Vec::new();
+        let mut bookkeeping_b: Vec<F> = Vec::new();
+        let mut bookkeeping_c: Vec<F> = Vec::new();
+        // store all handles for [x+a] and [y+b]
+        let mut x_plus_a_handles: Vec<String> = Vec::new();
+        let mut y_plus_b_handles: Vec<String> = Vec::new();
 
-    //         let share_a = self.get_wire(&h_a);
-    //         let share_b = self.get_wire(&h_b);
-    //         let share_c = self.get_wire(&h_c);
+        for i in 0..len {
+            let (h_a, h_b, h_c) = self.beaver().await;
 
-    //         let handle_x_plus_a = self.add(&x_handles[i], &h_a);
-    //         let handle_y_plus_b = self.add(&y_handles[i], &h_b);
-    //     }
-    // }
+            bookkeeping_a.push(self.get_wire(&h_a));
+            bookkeeping_b.push(self.get_wire(&h_b));
+            bookkeeping_c.push(self.get_wire(&h_c));
+
+            let handle_x_plus_a = self.add(&x_handles[i], &h_a);
+            let handle_y_plus_b = self.add(&y_handles[i], &h_b);
+
+            x_plus_a_handles.push(handle_x_plus_a);
+            y_plus_b_handles.push(handle_y_plus_b);
+        }
+
+        let x_plus_a_reconstructed = self
+            .batch_output_wire(&x_plus_a_handles)
+            .await;
+
+        let y_plus_b_reconstructed = self
+            .batch_output_wire(&y_plus_b_handles)
+            .await;
+
+        let mut output: Vec<String> = vec![];
+        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
+        for i in 0..len {
+            //only one party should add the constant term
+            let share_x_mul_y: F = match my_id {
+                0 => {
+                    x_plus_a_reconstructed[i] * y_plus_b_reconstructed[i] 
+                    - x_plus_a_reconstructed[i] * bookkeeping_b[i] 
+                    - y_plus_b_reconstructed[i] * bookkeeping_a[i]  
+                    + bookkeeping_c[i]
+                },
+                _ => {
+                    F::from(0)
+                    - x_plus_a_reconstructed[i] * bookkeeping_b[i] 
+                    - y_plus_b_reconstructed[i] * bookkeeping_a[i] 
+                    + bookkeeping_c[i]
+                }
+            };
+
+            let h = self.compute_fresh_wire_label();
+            self.wire_shares.insert(h.clone(), share_x_mul_y);
+
+            output.push(h.clone());
+        }
+
+        output
+    }
 
     pub async fn fixed_wire_handle(&mut self, value: F) -> String {
         let handle = self.compute_fresh_wire_label();
@@ -410,16 +456,17 @@ impl Evaluator {
             .map(|x| decode_bs58_str_as_f(&x))
             .collect();
 
-        let mut sum: F = my_share;
-        for v in incoming_values { sum += v; }
+        let sum = incoming_values
+            .iter()
+            .fold(my_share, |acc, v| acc + v);
         sum
     }
 
     /*
      * outputs the reconstructed value of all wires
      */
-    pub async fn batch_output_wire(&mut self, wire_handles: &[String]) -> HashMap<String, F> {
-        let mut outputs = HashMap::new();
+    pub async fn batch_output_wire(&mut self, wire_handles: &[String]) -> Vec<F> {
+        let mut outputs = Vec::new();
 
         let mut handles = Vec::new();
         let mut values = Vec::new();
@@ -445,10 +492,11 @@ impl Evaluator {
                 .map(|x| decode_bs58_str_as_f(&x))
                 .collect();
 
-            let mut sum: F = self.get_wire(&wire_handles[i]);
-            for v in incoming_values { sum += v; }
+            let sum = incoming_values
+                .iter()
+                .fold(self.get_wire(&wire_handles[i]), |acc, v| acc + v);
 
-            outputs.insert(wire_handles[i].clone(), sum);
+            outputs.push(sum);
         }
 
         outputs
@@ -854,9 +902,9 @@ pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
     let reconstructed_b = evaluator.batch_output_wire(&b_handles).await;
     let reconstructed_c = evaluator.batch_output_wire(&c_handles).await;
     for i in 0..5 {
-        let a = reconstructed_a.get(&a_handles[i]).unwrap();
-        let b = reconstructed_b.get(&b_handles[i]).unwrap();
-        let c = reconstructed_c.get(&c_handles[i]).unwrap();
+        let a = reconstructed_a.get(i).unwrap();
+        let b = reconstructed_b.get(i).unwrap();
+        let c = reconstructed_c.get(i).unwrap();
 
         assert_eq!(*c, (*a) * (*b));
     }
@@ -866,6 +914,31 @@ pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
     let h_mult_r1_r2 = evaluator.mult(&h_r1, &h_r2).await;
     let mult_r1_r2 = evaluator.output_wire(&h_mult_r1_r2).await;
     assert_eq!(mult_r1_r2, r1 * r2);
+
+    println!("testing batch multiplier...");
+    let mut xs_handles = Vec::new();
+    let mut ys_handles = Vec::new();
+    for _i in 0..5 {
+        let h_r1 = evaluator.ran();
+        let h_r2 = evaluator.ran();
+
+        xs_handles.push(h_r1);
+        ys_handles.push(h_r2);
+    }
+
+    let xs_mult_ys_handles = evaluator.batch_mult(
+        &xs_handles,
+        &ys_handles
+    ).await;
+
+    for i in 0..5 {
+        let x = evaluator.output_wire(&xs_handles[i]).await;
+        let y = evaluator.output_wire(&ys_handles[i]).await;
+        let xy = evaluator.output_wire(&xs_mult_ys_handles[i]).await;
+
+        assert_eq!(x * y, xy);
+    }
+
 
     println!("testing inverter...");
     let h_r3 = evaluator.ran();
