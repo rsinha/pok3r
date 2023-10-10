@@ -166,8 +166,7 @@ impl Evaluator {
     }
     
     pub async fn inv(&mut self, 
-        handle_in: &String,
-        handle_r: &String,
+        handle_in: &String
     ) -> String {
         // goal: compute inv([s])
         // step 1: invoke ran_p to obtain [r]
@@ -175,16 +174,17 @@ impl Evaluator {
         // step 3: reconstruct q = r . s
         // step 4: return [r] / q
         
+        let handle_r = self.ran();
         let handle_out = self.compute_fresh_wire_label();
         
         let handle_r_mult_s = self.mult(
             handle_in, 
-            handle_r).await;
+            &handle_r).await;
         //reconstruct the padded wires in the clear
         let r_mult_s = self.output_wire(&handle_r_mult_s).await;
 
         let q_inv = F::from(1) / r_mult_s;
-        let wire_out = q_inv * self.get_wire(handle_r);
+        let wire_out = q_inv * self.get_wire(&handle_r);
 
         self.wire_shares.insert(handle_out.clone(), wire_out);
 
@@ -942,9 +942,8 @@ pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
 
     println!("testing inverter...");
     let h_r3 = evaluator.ran();
-    let h_r4 = evaluator.ran();
     let r3 = evaluator.output_wire(&h_r3).await;
-    let h_r3_inverted = evaluator.inv(&h_r3, &h_r4).await;
+    let h_r3_inverted = evaluator.inv(&h_r3).await;
     let r3_inverted = evaluator.output_wire(&h_r3_inverted).await;
     assert_eq!(ark_bls12_377::Fr::from(1), r3 * r3_inverted);
 

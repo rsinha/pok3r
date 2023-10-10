@@ -215,17 +215,12 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     // Compute prfs for cards 52 to 63 and add to prfs first
     // So that the positions of these cards are fixed in the permutation
     for i in 52..64 {
-        let h_r = evaluator.ran();
-
         let ω = utils::multiplicative_subgroup_of_size(64);
         let ω_pow_i = utils::compute_power(&ω, i as u64);
 
         // y_i = g^{1 / (sk + w_i)}
         let denom = evaluator.clear_add(&sk, ω_pow_i);
-        let t_i = evaluator.inv(
-            &denom,
-            &h_r
-        ).await;
+        let t_i = evaluator.inv(&denom).await;
         let y_i = evaluator.output_wire_in_exponent(&t_i).await;
 
         prfs.insert(y_i.clone());
@@ -236,15 +231,10 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
 
     // TODO : After batching, this cannot be variable - must run ~1275 times or so to get enough cards with high probability
     while card_share_values.len() < 64 { // until you get the other 52 cards
-        let h_r = evaluator.ran();
-
         let a_i = evaluator.ran();
         let c_i = evaluator.ran_64(&a_i).await;
         let t_i = evaluator.add(&c_i, &sk);
-        let t_i = evaluator.inv(
-            &t_i,
-            &h_r
-        ).await;
+        let t_i = evaluator.inv(&t_i).await;
 
         // y_i = g^{1 / (sk + w_i)}
         let y_i = evaluator.output_wire_in_exponent(&t_i).await;
@@ -276,14 +266,8 @@ async fn compute_permutation_argument(
     let mut r_inv_is = vec![]; //vector of (handle, share_value) pairs
 
     for _i in 0..65 {
-        // Random value for inverse
-        let h_t = evaluator.ran();
-
         let h_r_i = evaluator.ran();
-        let h_r_inv_i = evaluator.inv(
-            &h_r_i,
-            &h_t
-        ).await;
+        let h_r_inv_i = evaluator.inv(&h_r_i).await;
 
         r_is.push((h_r_i.clone(), evaluator.get_wire(&h_r_i)));
         r_inv_is.push((h_r_inv_i.clone(), evaluator.get_wire(&h_r_inv_i)));
