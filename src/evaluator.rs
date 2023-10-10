@@ -575,6 +575,44 @@ impl Evaluator {
         sum
     }
 
+    pub async fn batch_add_g1_elements_from_all_parties(
+        &mut self,
+        inputs: &[G1],
+        identifiers: &[String]
+    ) -> Vec<G1> {
+        assert_eq!(inputs.len(), identifiers.len());
+
+        let mut outputs = Vec::new();
+
+        let values = inputs
+            .into_iter()
+            .map(|e| encode_g1_as_bs58_str(e))
+            .collect();
+
+        let msg = EvalNetMsg::PublishBatchValue {
+            sender: self.id.clone(),
+            handles: identifiers.into(),
+            values: values,
+        };
+        send_over_network!(msg, self.tx);
+
+        for i in 0..inputs.len() {
+            let incoming_msgs = self.collect_messages_from_all_peers(&identifiers[i]).await;
+            let incoming_values: Vec<G1> = incoming_msgs
+                .into_iter()
+                .map(|x| decode_bs58_str_as_g1(&x))
+                .collect();
+
+            let sum = incoming_values
+                .iter()
+                .fold(inputs[i], |acc, v| acc.add(v).into_affine());
+
+            outputs.push(sum);
+        }
+
+        outputs
+    }
+
     // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
     pub async fn add_gt_elements_from_all_parties(
         &mut self, value: &Gt, 
