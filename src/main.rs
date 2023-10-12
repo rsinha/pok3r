@@ -264,7 +264,7 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     return (card_share_handles.clone(), card_share_values);
 
     // Pre-batched version
-    
+
     // for i in 52..64 {
     //     let ω_pow_i = utils::compute_power(&ω, i as u64);
     //     // y_i = g^{1 / (sk + w_i)}
@@ -834,18 +834,27 @@ async fn encrypt_and_prove(
         // Compute eval vector for z_i * card_shares
         let mut d_i_evals = vec![];
 
-        //TODO: Rohit -- replace wit batch
-        for j in 0..64 {
-            let tmp = evaluator.mult(
-                &card_handles[j].clone(), 
-                &z_i.clone()
-            ).await;
+        let d_i_eval_handles = evaluator.batch_mult(
+            &card_handles.clone(), 
+            &vec![z_i; 64]
+        ).await;
 
-            d_i_evals.push((tmp.clone(), evaluator.get_wire(&tmp)));
+        for j in 0..64 {
+            d_i_evals.push(evaluator.get_wire(&d_i_eval_handles[j]));
         }
 
+        // Old loop without batching
+        // for j in 0..64 {
+        //     let tmp = evaluator.mult(
+        //         &card_handles[j].clone(), 
+        //         &z_i.clone()
+        //     ).await;
+
+        //     d_i_evals.push(evaluator.get_wire(&tmp));
+        // }
+
         let d_i_poly_share = utils::interpolate_poly_over_mult_subgroup(
-            &d_i_evals.clone().into_iter().map(|x| x.1).collect()
+            &d_i_evals
         );
 
         // Compute eval_proof for d_i

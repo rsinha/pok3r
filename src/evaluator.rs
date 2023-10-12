@@ -835,6 +835,16 @@ impl Evaluator {
         (c1, c2)
     }
 
+    // pub async fn batch_dist_ibe_encrypt(
+    //     &mut self, 
+    //     msg_share_handles: &[String], // [z1]
+    //     mask_share_handles: &[String], // [r]
+    //     pk: &G2, 
+    //     id: BigUint
+    // ) -> (Vec<G1>, Vec<Gt>) {
+    //     assert_eq!(msg_share_handles.len(), mask_share_handles.len());
+    // }
+
     //returns the handle which 
     fn process_next_message(&mut self, msg: &EvalNetMsg) {
         match msg {
