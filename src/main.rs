@@ -402,44 +402,65 @@ async fn compute_permutation_argument(
     let h_poly = utils::interpolate_poly_over_mult_subgroup(&h_evals);
 
     // Compute s_i' and t_i'
-    let mut t_prime_is = vec![];
 
-    // 15: for i ← 0 . . . 63 (in parallel) do
-    // 16: Parties invoke FMULT with inputs (h−1i ·[gi]p, [ri]p) to get [s′i]p.
-    // 17: Parties invoke FMULT with inputs ([s′i]p, [r−1i+1]p) to get [t'i]p.
-    // 18: Parties reconstruct t′i.
-    // 19: end for
-    for i in 0..64 {
-        let h_r_i = &r_is.get(i).unwrap();
-        let h_r_inv_i_plus_1 = &r_inv_is.get(i+1).unwrap();
+    let h_h_inv_g_is = (0..64)
+        .into_iter()
+        .map(|i| {
+            let h_inv_i = h_evals[i].inverse().unwrap();
+            let h_g_i = &h_g_shares[i];
+            evaluator.scale(h_g_i, h_inv_i)
+        })
+        .collect::<Vec<String>>();
+
+    let h_s_prime_is = evaluator.batch_mult(
+        &r_is[0..64].to_vec(), 
+        &h_h_inv_g_is
+    ).await;
+    let h_t_prime_is = evaluator.batch_mult(
+        &r_inv_is[1..65].to_vec(), 
+        &h_s_prime_is
+    ).await;
+
+    let t_prime_is = evaluator.batch_output_wire(&h_t_prime_is).await;
+
+    // let mut t_prime_is = vec![];
+
+    // // 15: for i ← 0 . . . 63 (in parallel) do
+    // // 16: Parties invoke FMULT with inputs (h−1i ·[gi]p, [ri]p) to get [s′i]p.
+    // // 17: Parties invoke FMULT with inputs ([s′i]p, [r−1i+1]p) to get [t'i]p.
+    // // 18: Parties reconstruct t′i.
+    // // 19: end for
+    // for i in 0..64 {
+    //     let h_r_i = &r_is.get(i).unwrap();
+    //     let h_r_inv_i_plus_1 = &r_inv_is.get(i+1).unwrap();
         
-        // Get a handle for g_i and scale with h_i^inv
-        let h_g_i = &h_g_shares[i];
-        let h_inv_i = h_evals[i].inverse().unwrap();
-        let h_h_inv_g_i = &evaluator.scale(h_g_i, h_inv_i);
+    //     // Get a handle for g_i and scale with h_i^inv
+    //     let h_g_i = &h_g_shares[i];
+    //     let h_inv_i = h_evals[i].inverse().unwrap();
+    //     let h_h_inv_g_i = &evaluator.scale(h_g_i, h_inv_i);
 
-        // Parties invoke FMULT with inputs (h−1
-        // i ·[gi]p, [ri]p)
-        // to get [s′
-        // i]p
-        let s_prime_i = evaluator.mult(
-            h_r_i,
-            h_h_inv_g_i
-        ).await;
+    //     // Parties invoke FMULT with inputs (h−1
+    //     // i ·[gi]p, [ri]p)
+    //     // to get [s′
+    //     // i]p
+    //     let s_prime_i = evaluator.mult(
+    //         h_r_i,
+    //         h_h_inv_g_i
+    //     ).await;
 
-        // Parties invoke FMULT with inputs ([s′
-        // i]p, [r−1
-        // i+1]p) to
-        // get [t′
-        // i ]p
-        let t_prime_i = evaluator.mult(
-            h_r_inv_i_plus_1,
-            &s_prime_i
-        ).await;
+    //     // Parties invoke FMULT with inputs ([s′
+    //     // i]p, [r−1
+    //     // i+1]p) to
+    //     // get [t′
+    //     // i ]p
+    //     let t_prime_i = evaluator.mult(
+    //         h_r_inv_i_plus_1,
+    //         &s_prime_i
+    //     ).await;
 
-        let t_prime_i = evaluator.output_wire(&t_prime_i).await;
-        t_prime_is.push(t_prime_i);
-    }
+    //     let t_prime_i = evaluator.output_wire(&t_prime_i).await;
+    //     t_prime_is.push(t_prime_i);
+    // }
 
     // Locally compute t_i
     // 20: for i ← 0 . . . 63 do
