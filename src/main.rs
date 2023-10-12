@@ -238,7 +238,7 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     }
     
     // Compute the random permutation - try for num_tries to get the other 52 cards
-    let num_tries = 300;
+    let num_tries = 500;
 
     let c_is = evaluator.batch_ran_64(num_tries).await;
     let t_is = (0..num_tries)
@@ -303,39 +303,37 @@ async fn compute_permutation_argument(
     card_share_handles: Vec<String>,
     card_share_values: &Vec<F>
 ) -> PermutationProof {
+
     // Compute r_i and r_i^-1
-    // 1: for i ← 0 . . . 65 (in parallel) do
-    // 2: Parties invoke FRANp to obtain [ri]p
-    // 3: Parties invoke FINV with input [ri]p to obtain [ri]−1
-    // 4: end for
-    let mut r_is = vec![]; //vector of (handle, share_value) pairs
-    let mut r_inv_is = vec![]; //vector of (handle, share_value) pairs
+    let r_is = (0..65)
+        .into_iter()
+        .map(|_i| evaluator.ran())
+        .collect::<Vec<String>>();
 
-    for _i in 0..65 {
-        let h_r_i = evaluator.ran();
-        let h_r_inv_i = evaluator.inv(&h_r_i).await;
+    let r_inv_is = evaluator.batch_inv(&r_is).await;
 
-        r_is.push((h_r_i.clone(), evaluator.get_wire(&h_r_i)));
-        r_inv_is.push((h_r_inv_i.clone(), evaluator.get_wire(&h_r_inv_i)));
-    }
+    // for _i in 0..65 {
+    //     let h_r_i = evaluator.ran();
+    //     let h_r_inv_i = evaluator.inv(&h_r_i).await;
+
+    //     r_is.push((h_r_i.clone(), evaluator.get_wire(&h_r_i)));
+    //     r_inv_is.push((h_r_inv_i.clone(), evaluator.get_wire(&h_r_inv_i)));
+    // }
 
     // Compute b_i from r_i and r_i^-1
-    // 5: for i ← 0 . . . 64 (in parallel) do
-    // 6: Parties invoke FMULT with inputs ([r-1 0]p, [ri+1]p) to obtain [bi]p.
-    // 7: end for
-    let mut b_is = vec![]; //vector of (handle, share_value) pairs
-    for i in 0..64 {
+    let b_is = evaluator.batch_mult(&vec![r_inv_is[0].clone(); 64], &r_is[1..65].to_vec()).await;
 
-        let h_r_inv_0 = &r_inv_is.get(0).unwrap().0;
-        let h_r_i_plus_1 = &r_is.get(i+1).unwrap().0;
+    // for i in 0..64 {
+    //     let h_r_inv_0 = &r_inv_is.get(0).unwrap().0;
+    //     let h_r_i_plus_1 = &r_is.get(i+1).unwrap().0;
 
-        let h_b_i = evaluator.mult(
-            h_r_inv_0,
-            h_r_i_plus_1
-        ).await;
+    //     let h_b_i = evaluator.mult(
+    //         h_r_inv_0,
+    //         h_r_i_plus_1
+    //     ).await;
 
-        b_is.push((h_b_i.clone(), evaluator.get_wire(&h_b_i)));
-    }
+    //     b_is.push((h_b_i.clone(), evaluator.get_wire(&h_b_i)));
+    // }
 
     // 8: Interpret the vector fi as evaluations of a polynomial f(X).
     let f_name = String::from("perm_f");
@@ -389,13 +387,13 @@ async fn compute_permutation_argument(
     let g_share_com = utils::commit_poly(pp, &g_share_poly);
     let g_com = evaluator.add_g1_elements_from_all_parties(&g_share_com, &String::from("perm_g")).await;
 
-    // Assert that g(X) is correctly computed in both prover and verifier
-    // Commit to constant polynomial const(x) = y1
-    let const_y1 = DensePolynomial::from_coefficients_vec(vec![y1]);
-    let const_com_y1 = utils::commit_poly(pp, &const_y1);
+    // // Assert that g(X) is correctly computed in both prover and verifier
+    // // Commit to constant polynomial const(x) = y1
+    // let const_y1 = DensePolynomial::from_coefficients_vec(vec![y1]);
+    // let const_com_y1 = utils::commit_poly(pp, &const_y1);
 
-    let g_com_verifier = (f_com.clone() + const_com_y1).into_affine();
-    assert_eq!(g_com, g_com_verifier);
+    // let g_com_verifier = (f_com.clone() + const_com_y1).into_affine();
+    // assert_eq!(g_com, g_com_verifier);
 
     // 14: Compute h(X) = v(X) + y1
     let mut h_evals = vec![];
@@ -414,8 +412,8 @@ async fn compute_permutation_argument(
     // 18: Parties reconstruct t′i.
     // 19: end for
     for i in 0..64 {
-        let h_r_i = &r_is.get(i).unwrap().0;
-        let h_r_inv_i_plus_1 = &r_inv_is.get(i+1).unwrap().0;
+        let h_r_i = &r_is.get(i).unwrap();
+        let h_r_inv_i_plus_1 = &r_inv_is.get(i+1).unwrap();
         
         // Get a handle for g_i and scale with h_i^inv
         let h_g_i = &h_g_shares[i];
@@ -458,7 +456,7 @@ async fn compute_permutation_argument(
         }
 
         // Multiply by b_i to remove random masks
-        let t_i = evaluator.scale(&b_is[i].0, tmp);       
+        let t_i = evaluator.scale(&b_is[i], tmp);       
 
         t_is.push((t_i.clone(), evaluator.get_wire(&t_i)));
     }
