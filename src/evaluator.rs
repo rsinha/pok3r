@@ -168,7 +168,7 @@ impl Evaluator {
             }
         
             let mut l = a_exp_64s[i];
-            for _ in 0..6 {
+            for _ in 0..LOG_PERM_SIZE {
                 l = utils::compute_root(&l);
             }
 
@@ -833,7 +833,7 @@ impl Evaluator {
 
     pub async fn batch_exp(&mut self, input_labels: &[String]) -> Vec<String> {
         let mut tmp = input_labels.to_vec();
-        for _i in 0..6 {
+        for _i in 0..LOG_PERM_SIZE {
             tmp = self.batch_mult(
                 &tmp, 
                 &tmp
@@ -983,7 +983,7 @@ impl Evaluator {
 
         let c1s = self.batch_exp_and_reveal_g1(
             vec![vec![<Curve as Pairing>::G1Affine::generator()]; msg_share_handles.len()], 
-            vec![mask_share_handles.to_vec(); 64], 
+            vec![mask_share_handles.to_vec(); PERM_SIZE], 
             msg_share_handles
                 .iter()
                 .map(|h| String::from("ibe_c1_".to_owned() + h))
