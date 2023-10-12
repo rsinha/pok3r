@@ -414,7 +414,7 @@ impl Evaluator {
     }
 
     /// PolyEval takes as input a shared polynomial f(x) and a point x and returns share of f(x)
-    pub async fn share_poly_eval(&mut self, 
+    pub fn share_poly_eval(&mut self, 
         f_poly_share: DensePolynomial<F>,
         x: F,
      ) -> String {
@@ -438,26 +438,25 @@ impl Evaluator {
         f_poly_share: DensePolynomial<F>,
         g_poly_share: DensePolynomial<F>,
      ) -> DensePolynomial<F> {
-
-        let mut h_evals = Vec::new();
-        let alpha = utils::multiplicative_subgroup_of_size(128);
-        let powers_of_alpha: Vec<F> = (0..128)
+        let alpha = utils::multiplicative_subgroup_of_size(2*PERM_SIZE as u64);
+        let powers_of_alpha: Vec<F> = (0..2*PERM_SIZE)
             .into_iter()
             .map(|i| utils::compute_power(&alpha, i as u64))
             .collect();
 
-        for i in 0..128 {
-            let f_eval = self.share_poly_eval(f_poly_share.clone(), powers_of_alpha[i]).await;
-            let g_eval = self.share_poly_eval(g_poly_share.clone(), powers_of_alpha[i]).await;
+        let mut f_evals = Vec::new();
+        let mut g_evals = Vec::new();
 
-            // Compute h_evals from f_evals and g_evals using Beaver mult
-            let h_eval = self.mult(
-                &f_eval, 
-                &g_eval
-            ).await;
-
-            h_evals.push(self.get_wire(&h_eval));
+        for i in 0..2*PERM_SIZE {
+            f_evals.push(self.share_poly_eval(f_poly_share.clone(), powers_of_alpha[i]));
+            g_evals.push(self.share_poly_eval(g_poly_share.clone(), powers_of_alpha[i]));
         }
+
+        // Compute h_evals from f_evals and g_evals using Beaver mult
+        let h_evals = self.batch_mult(&f_evals, &g_evals).await
+            .into_iter()
+            .map(|x| self.get_wire(&x))
+            .collect::<Vec<F>>();
 
         // Interpolate h_evals to get h_poly_share
         let h_poly_share = utils::interpolate_poly_over_mult_subgroup(&h_evals);

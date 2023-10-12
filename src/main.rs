@@ -309,9 +309,9 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     let t_is = (0..num_tries)
         .into_iter()
         .map(|i| evaluator.add(&c_is[i], &sk))
-        .collect::<Vec<String>>();
-    let t_is = evaluator.batch_inv(&t_is).await;
+        .collect::<Vec<String>>();    
 
+    let t_is = evaluator.batch_inv(&t_is).await;
     let y_is = evaluator.batch_output_wire_in_exponent(&t_is).await;
 
     for i in 0..num_tries {
@@ -600,24 +600,27 @@ async fn compute_permutation_argument(
     let w63 = utils::compute_power(&w, PERM_SIZE as u64 - 1);
 
     // Evaluate t(x) at w^63
-    let h_y1 = evaluator.share_poly_eval(t_share_poly.clone(), w63).await;
-    let pi_1 = evaluator.eval_proof_with_share_poly(pp, t_share_poly.clone(), w63, String::from("perm_pi_1")).await;
-
+    let h_y1 = evaluator.share_poly_eval(t_share_poly.clone(), w63);
+    
     // Evaluate t(x) at y2
-    let h_y2 = evaluator.share_poly_eval(t_share_poly.clone(), y2).await;
-    let pi_2 = evaluator.eval_proof_with_share_poly(pp, t_share_poly.clone(), y2, String::from("perm_pi_2")).await;
-
+    let h_y2 = evaluator.share_poly_eval(t_share_poly.clone(), y2);
+    
     // Evaluate t(x) at y2 / w
-    let h_y3 = evaluator.share_poly_eval(t_share_poly.clone(), y2 / w).await;
-    let pi_3 = evaluator.eval_proof_with_share_poly(pp, t_share_poly.clone(), y2 / w, String::from("perm_pi_3")).await;
-
+    let h_y3 = evaluator.share_poly_eval(t_share_poly.clone(), y2 / w);
+    
     // Evaluate g(x) at y2
-    let h_y4 = evaluator.share_poly_eval(g_share_poly.clone(), y2).await;
-    let pi_4 = evaluator.eval_proof_with_share_poly(pp, g_share_poly.clone(), y2, String::from("perm_pi_4")).await;
-
+    let h_y4 = evaluator.share_poly_eval(g_share_poly.clone(), y2);
+    
     // Evaluate q(x) at y2
-    let h_y5 = evaluator.share_poly_eval(q_share_poly.clone(), y2).await;
-    let pi_5 = evaluator.eval_proof_with_share_poly(pp, q_share_poly.clone(), y2, String::from("perm_pi_5")).await;
+    let h_y5 = evaluator.share_poly_eval(q_share_poly.clone(), y2);
+    
+    // Compute proofs
+    let pi_s = evaluator.batch_eval_proof_with_share_poly(
+        pp, 
+        &vec![t_share_poly.clone(), t_share_poly.clone(), t_share_poly.clone(), g_share_poly.clone(), q_share_poly.clone()],
+        &vec![w63, y2, y2 / w, y2, y2],
+        &vec![String::from("perm_pi_1"), String::from("perm_pi_2"), String::from("perm_pi_3"), String::from("perm_pi_4"), String::from("perm_pi_5")]
+    ).await;
 
     PermutationProof {
         y1: evaluator.output_wire(&h_y1).await,
@@ -625,11 +628,11 @@ async fn compute_permutation_argument(
         y3: evaluator.output_wire(&h_y3).await,
         y4: evaluator.output_wire(&h_y4).await,
         y5: evaluator.output_wire(&h_y5).await,
-        pi_1,
-        pi_2,
-        pi_3,
-        pi_4,
-        pi_5,
+        pi_1: pi_s[0].clone(),
+        pi_2: pi_s[1].clone(),
+        pi_3: pi_s[2].clone(),
+        pi_4: pi_s[3].clone(),
+        pi_5: pi_s[4].clone(),
         f_com,
         q_com,
         t_com
@@ -1270,7 +1273,7 @@ pub async fn test_dist_kzg(evaluator: &mut Evaluator) {
     let w = utils::multiplicative_subgroup_of_size(PERM_SIZE as u64);
     let pi = evaluator.eval_proof_with_share_poly(&pp, poly.clone(), w, String::from("kzg_test_pi")).await;
 
-    let evaluation_at_w = evaluator.share_poly_eval(poly.clone(), w).await;
+    let evaluation_at_w = evaluator.share_poly_eval(poly.clone(), w);
 
 
     let b = utils::kzg_check(&pp, &com, &w, &evaluator.output_wire(&evaluation_at_w).await, &pi);
@@ -1301,9 +1304,9 @@ async fn test_share_poly_mult(evaluator: &mut Evaluator) {
     ).await;
 
     // Evaluate share_poly_1, share_poly_2 and share_poly_3 at random_point
-    let poly_1_val = evaluator.share_poly_eval(share_poly_1.clone(), random_point).await;
-    let poly_2_val = evaluator.share_poly_eval(share_poly_2.clone(), random_point).await;
-    let poly_3_val = evaluator.share_poly_eval(share_poly_3.clone(), random_point).await;
+    let poly_1_val = evaluator.share_poly_eval(share_poly_1.clone(), random_point);
+    let poly_2_val = evaluator.share_poly_eval(share_poly_2.clone(), random_point);
+    let poly_3_val = evaluator.share_poly_eval(share_poly_3.clone(), random_point);
 
     let v_1 = evaluator.output_wire(&poly_1_val).await;
     let v_2 = evaluator.output_wire(&poly_2_val).await;
