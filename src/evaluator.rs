@@ -707,7 +707,7 @@ impl Evaluator {
         &mut self, 
         bases: Vec<G1>, 
         exponent_handles: Vec<String>, 
-        func_name: &String
+        identifier: &String
     ) -> G1 {
         let mut sum = G1::zero();
         
@@ -719,7 +719,35 @@ impl Evaluator {
             sum = sum.add(exponentiated).into_affine();
         }
 
-        self.add_g1_elements_from_all_parties(&sum, func_name).await
+        self.add_g1_elements_from_all_parties(&sum, identifier).await
+    }
+
+    pub async fn batch_exp_and_reveal_g1(
+        &mut self, 
+        bases: Vec<Vec<G1>>,
+        exponent_handles: Vec<Vec<String>>,
+        identifiers: Vec<String>
+    ) -> Vec<G1> {
+        let len = bases.len();
+
+        assert_eq!(len, exponent_handles.len());
+        assert_eq!(len, identifiers.len());
+
+        let mut group_elements = vec![];
+
+        for i in 0..len {
+            let msm_input = bases[i].iter().zip(exponent_handles[i].iter());
+            let mut sum = G1::zero();
+
+            for (base, exponent_handle) in msm_input {
+                let exponentiated = base.mul(self.get_wire(exponent_handle)).into_affine();
+                sum = sum.add(exponentiated).into_affine();
+            }
+
+            group_elements.push(sum);
+        }
+
+        self.batch_add_g1_elements_from_all_parties(&group_elements, &identifiers).await
     }
 
     /// returns a^64
