@@ -9,7 +9,6 @@ use async_std::task;
 use futures::channel::*;
 use clap::Parser;
 use kzg::UniversalParams;
-use libp2p::PeerId;
 use num_bigint::BigUint;
 use rand::{rngs::StdRng, SeedableRng};
 use serde_json::json;
