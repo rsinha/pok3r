@@ -216,7 +216,7 @@ async fn main() {
 
     // Get random ids as byte strings
     let mut ids = vec![];
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         let id = BigUint::from(i as u8);
         ids.push(id);
     }
@@ -251,15 +251,15 @@ async fn main() {
     netd_handle.join().unwrap();
 }
 
-fn map_roots_of_unity_to_cards() -> HashMap<F, String> {
+fn _map_roots_of_unity_to_cards() -> HashMap<F, String> {
     let mut output: HashMap<F, String> = HashMap::new();
     
     // get generator for the 64 powers of 64-th root of unity
-    let ω = utils::multiplicative_subgroup_of_size(64);
+    let ω = utils::multiplicative_subgroup_of_size(PERM_SIZE as u64);
 
     // map each power to a card
     // map 64 cards
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         let ω_pow_i = utils::compute_power(&ω, i as u64);
         let card_name = i.to_string();
         output.insert(ω_pow_i, card_name);
@@ -281,14 +281,14 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     // Compute prfs for cards 52 to 63 and add to prfs first
     // So that the positions of these cards are fixed in the permutation
 
-    let ω = utils::multiplicative_subgroup_of_size(64);
-    let powers_of_ω = (0..64)
+    let ω = utils::multiplicative_subgroup_of_size(PERM_SIZE as u64);
+    let powers_of_ω = (0..PERM_SIZE)
         .into_iter()
         .map(|i| utils::compute_power(&ω, i as u64))
         .collect::<Vec<F>>();
 
     // y_i = g^{1 / (sk + w_i)}
-    let denoms = (0..64)
+    let denoms = (0..PERM_SIZE)
         .into_iter()
         .map(|i| evaluator.clear_add(&sk, powers_of_ω[i]))
         .collect::<Vec<String>>();
@@ -296,7 +296,7 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     let t_is = evaluator.batch_inv(&denoms).await;
     let y_is = evaluator.batch_output_wire_in_exponent(&t_is).await;
 
-    for i in 52..64 {
+    for i in DECK_SIZE..PERM_SIZE {
         prfs.insert(y_is[i].clone());
         let handle = evaluator.fixed_wire_handle(powers_of_ω[i]).await;
         card_share_handles.push(handle.clone());
@@ -325,7 +325,7 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     }
 
     // Assert that the length is 64
-    assert_eq!(card_share_handles.len(), 64, "We don't have enough cards - try again");
+    assert_eq!(card_share_handles.len(), PERM_SIZE, "We don't have enough cards - try again");
 
     return (card_share_handles.clone(), card_share_values);
 
@@ -371,7 +371,7 @@ async fn compute_permutation_argument(
 ) -> PermutationProof {
 
     // Compute r_i and r_i^-1
-    let r_is = (0..65)
+    let r_is = (0..PERM_SIZE+1)
         .into_iter()
         .map(|_i| evaluator.ran())
         .collect::<Vec<String>>();
@@ -387,7 +387,10 @@ async fn compute_permutation_argument(
     // }
 
     // Compute b_i from r_i and r_i^-1
-    let b_is = evaluator.batch_mult(&vec![r_inv_is[0].clone(); 64], &r_is[1..65].to_vec()).await;
+    let b_is = evaluator.batch_mult(
+        &vec![r_inv_is[0].clone(); PERM_SIZE], 
+        &r_is[1..PERM_SIZE+1].to_vec()
+    ).await;
 
     // for i in 0..64 {
     //     let h_r_inv_0 = &r_inv_is.get(0).unwrap().0;
@@ -412,8 +415,8 @@ async fn compute_permutation_argument(
 
     // 9: Define the degree-64 polynomial v(X) such that the evaluation vector is (1, ω, . . . , ω63)
     // This polynomial is the unpermuted vector of cards 
-    let ω = utils::multiplicative_subgroup_of_size(64);
-    let v_evals: Vec<F> = (0..64)
+    let ω = utils::multiplicative_subgroup_of_size(PERM_SIZE as u64);
+    let v_evals: Vec<F> = (0..PERM_SIZE)
         .into_iter()
         .map(|i| utils::compute_power(&ω, i as u64))
         .collect();
@@ -435,7 +438,7 @@ async fn compute_permutation_argument(
     // 13: Locally compute g(X) shares from f(X) shares
     let mut g_eval_shares = vec![];
     let mut h_g_shares = vec![];
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         // let g_share_i = card_share_values[i] + y1;
         // g_eval_shares.push(g_i);
 
@@ -463,58 +466,79 @@ async fn compute_permutation_argument(
 
     // 14: Compute h(X) = v(X) + y1
     let mut h_evals = vec![];
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         let h_i = v_evals[i] + y1;
         h_evals.push(h_i);
     }
     let h_poly = utils::interpolate_poly_over_mult_subgroup(&h_evals);
 
     // Compute s_i' and t_i'
-    let mut t_prime_is = vec![];
 
-    // 15: for i ← 0 . . . 63 (in parallel) do
-    // 16: Parties invoke FMULT with inputs (h−1i ·[gi]p, [ri]p) to get [s′i]p.
-    // 17: Parties invoke FMULT with inputs ([s′i]p, [r−1i+1]p) to get [t'i]p.
-    // 18: Parties reconstruct t′i.
-    // 19: end for
-    for i in 0..64 {
-        let h_r_i = &r_is.get(i).unwrap();
-        let h_r_inv_i_plus_1 = &r_inv_is.get(i+1).unwrap();
+    let h_h_inv_g_is = (0..PERM_SIZE)
+        .into_iter()
+        .map(|i| {
+            let h_inv_i = h_evals[i].inverse().unwrap();
+            let h_g_i = &h_g_shares[i];
+            evaluator.scale(h_g_i, h_inv_i)
+        })
+        .collect::<Vec<String>>();
+
+    let h_s_prime_is = evaluator.batch_mult(
+        &r_is[0..PERM_SIZE].to_vec(), 
+        &h_h_inv_g_is
+    ).await;
+    let h_t_prime_is = evaluator.batch_mult(
+        &r_inv_is[1..PERM_SIZE+1].to_vec(), 
+        &h_s_prime_is
+    ).await;
+
+    let t_prime_is = evaluator.batch_output_wire(&h_t_prime_is).await;
+
+    // let mut t_prime_is = vec![];
+
+    // // 15: for i ← 0 . . . 63 (in parallel) do
+    // // 16: Parties invoke FMULT with inputs (h−1i ·[gi]p, [ri]p) to get [s′i]p.
+    // // 17: Parties invoke FMULT with inputs ([s′i]p, [r−1i+1]p) to get [t'i]p.
+    // // 18: Parties reconstruct t′i.
+    // // 19: end for
+    // for i in 0..64 {
+    //     let h_r_i = &r_is.get(i).unwrap();
+    //     let h_r_inv_i_plus_1 = &r_inv_is.get(i+1).unwrap();
         
-        // Get a handle for g_i and scale with h_i^inv
-        let h_g_i = &h_g_shares[i];
-        let h_inv_i = h_evals[i].inverse().unwrap();
-        let h_h_inv_g_i = &evaluator.scale(h_g_i, h_inv_i);
+    //     // Get a handle for g_i and scale with h_i^inv
+    //     let h_g_i = &h_g_shares[i];
+    //     let h_inv_i = h_evals[i].inverse().unwrap();
+    //     let h_h_inv_g_i = &evaluator.scale(h_g_i, h_inv_i);
 
-        // Parties invoke FMULT with inputs (h−1
-        // i ·[gi]p, [ri]p)
-        // to get [s′
-        // i]p
-        let s_prime_i = evaluator.mult(
-            h_r_i,
-            h_h_inv_g_i
-        ).await;
+    //     // Parties invoke FMULT with inputs (h−1
+    //     // i ·[gi]p, [ri]p)
+    //     // to get [s′
+    //     // i]p
+    //     let s_prime_i = evaluator.mult(
+    //         h_r_i,
+    //         h_h_inv_g_i
+    //     ).await;
 
-        // Parties invoke FMULT with inputs ([s′
-        // i]p, [r−1
-        // i+1]p) to
-        // get [t′
-        // i ]p
-        let t_prime_i = evaluator.mult(
-            h_r_inv_i_plus_1,
-            &s_prime_i
-        ).await;
+    //     // Parties invoke FMULT with inputs ([s′
+    //     // i]p, [r−1
+    //     // i+1]p) to
+    //     // get [t′
+    //     // i ]p
+    //     let t_prime_i = evaluator.mult(
+    //         h_r_inv_i_plus_1,
+    //         &s_prime_i
+    //     ).await;
 
-        let t_prime_i = evaluator.output_wire(&t_prime_i).await;
-        t_prime_is.push(t_prime_i);
-    }
+    //     let t_prime_i = evaluator.output_wire(&t_prime_i).await;
+    //     t_prime_is.push(t_prime_i);
+    // }
 
     // Locally compute t_i
     // 20: for i ← 0 . . . 63 do
     // 21: Parties locally compute [ti]p ← [bi]p · ∏ij=0 t′j
     // 22: end for
     let mut t_is = vec![];
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         // let tmp = product of t'_i from 0 to i
         let mut tmp = F::one();
         for j in 0..(i+1) {
@@ -550,7 +574,7 @@ async fn compute_permutation_argument(
 
     // Compute q(X) and r(X) as quotient and remainder of d(X) / (X^64 - 1)
     // TOASSERT - Reconstructed r(X) should be 0
-    let domain = GeneralEvaluationDomain::<F>::new(64).unwrap();
+    let domain = GeneralEvaluationDomain::<F>::new(PERM_SIZE).unwrap();
     let (q_share_poly, _) = d_share_poly.divide_by_vanishing_poly(domain).unwrap();
 
     // Commit to q(X)
@@ -573,8 +597,8 @@ async fn compute_permutation_argument(
     let y2 = utils::fs_hash(vec![&v_bytes, &f_bytes, &q_bytes, &t_bytes, &g_bytes], 1)[0];
 
     // Compute polyevals and proofs
-    let w = utils::multiplicative_subgroup_of_size(64);
-    let w63 = utils::compute_power(&w, 63);
+    let w = utils::multiplicative_subgroup_of_size(PERM_SIZE as u64);
+    let w63 = utils::compute_power(&w, PERM_SIZE as u64 - 1);
 
     // Evaluate t(x) at w^63
     let h_y1 = evaluator.share_poly_eval(t_share_poly.clone(), w63).await;
@@ -620,10 +644,10 @@ async fn verify_permutation_argument(
     let mut b = true;
 
     // Compute v(X) from powers of w
-    let w = utils::multiplicative_subgroup_of_size(64);
-    let w63 = utils::compute_power(&w, 63);
+    let w = utils::multiplicative_subgroup_of_size(PERM_SIZE as u64);
+    let w63 = utils::compute_power(&w, PERM_SIZE as u64 - 1);
 
-    let v_evals: Vec<F> = (0..64)
+    let v_evals: Vec<F> = (0..PERM_SIZE)
         .into_iter()
         .map(|i| utils::compute_power(&w, i as u64))
         .collect();
@@ -704,7 +728,7 @@ async fn verify_permutation_argument(
     // Check 1 : y2 * (v(hash2) + hash1) - y3 * y4 = y5 * (hash2^k - 1)
     let tmp1 = perm_proof.y2 * (v.evaluate(&hash2) + hash1);
     let tmp2 = perm_proof.y3 * perm_proof.y4;
-    let tmp3 = perm_proof.y5 * (hash2.pow([64]) - F::one());
+    let tmp3 = perm_proof.y5 * (hash2.pow([PERM_SIZE as u64]) - F::one());
 
     b = b & (tmp1 - tmp2 == tmp3);
 
@@ -773,7 +797,7 @@ pub async fn dist_sigma_proof(
     // x = gamma * sum_i (lin_comb_ran[i] * wit_1_handles[i]) + b1
     let mut h_x = evaluator.scale(&wit_1_handles[0], lin_comb_ran[0]);
 
-    for i in 1..64 {
+    for i in 1..PERM_SIZE {
         let tmp = evaluator.scale(&wit_1_handles[i], lin_comb_ran[i]);
         h_x = evaluator.add(&tmp, &h_x);
     }
@@ -848,91 +872,151 @@ async fn encrypt_and_prove(
 
     // Sample common randomness for encryption
     let r = evaluator.ran();
+    let w = utils::multiplicative_subgroup_of_size(PERM_SIZE as u64);
 
-    let mut z_is = vec![]; //vector of (handle, share_value) pairs
-    let mut d_is = vec![]; //vector of scaled commitments 
-    let mut v_is = vec![]; //vector of (handle, share_value) pairs
-    let mut v_is_reconstructed = vec![]; //vector of reconstructed v_i values
-    let mut pi_is = vec![]; //vector of evaluation proofs
+    // Sample masks to be encrypted
+    let z_is = (0..PERM_SIZE)
+        .into_iter()
+        .map(|_i| evaluator.ran())
+        .collect::<Vec<String>>();
 
-    let mut c1_is = vec![]; //vector of ciphertexts
-    let mut c2_is = vec![]; //vector of ciphertexts
+    // Encrypt the masks to ids
+    let (c1s, c2s) = evaluator.batch_dist_ibe_encrypt(
+        &z_is, 
+        &vec![r.clone(); PERM_SIZE], 
+        &pk, 
+        ids.as_slice()
+    ).await;
 
-    let w = utils::multiplicative_subgroup_of_size(64);
+    // Compute d_i = C^z_i
+    let d_is = evaluator.batch_exp_and_reveal_g1(
+        vec![vec![card_commitment]; PERM_SIZE], 
+        z_is.clone().into_iter().map(|x| vec![x]).collect(), 
+        (0..PERM_SIZE).into_iter().map(|i| format!("{}/{}", "enc_prove_D_", i)).collect()
+    ).await;
 
-    for i in 0..64 {
-        // Sample mask to be encrypted
-        let z_i = evaluator.ran();
-        z_is.push((z_i.clone(), evaluator.get_wire(&z_i.clone())));
+    // Compute v_i = z_i * card_i
+    let v_is = evaluator.batch_mult(
+        &z_is, 
+        &card_handles
+    ).await;
 
-        // Encrypt the mask to id_i
-        let (c1_i, c2_i) = 
-            evaluator.dist_ibe_encrypt(
-                &z_i, 
-                &r, 
-                &pk, 
-                ids[i].clone()
-            ).await;
-        c1_is.push(c1_i);
-        c2_is.push(c2_i); 
+    let v_is_reconstructed = evaluator.batch_output_wire(&v_is).await;
 
-        // Compute d_i = C^z_i
-        let d_i = 
-            evaluator.exp_and_reveal_g1(
-                vec![card_commitment], 
-                vec![z_i.clone()], 
-                &format!("{}/{}", "enc_prove_D_", i)
-            ).await;
-        d_is.push(d_i.clone());
+    // Compute eval vector for z_i * card_shares
+    // each elem of vector - [batchmult(cards, z_i*64)]
+    // make it one vector - batchmult([cards * 64], [z1*64, z2*64, ])
 
-        // Compute v_i = z_i * card_i
-        let v_i = evaluator.mult(&z_i, &card_handles[i]).await;        
-        v_is.push((v_i.clone(), evaluator.get_wire(&v_i)));
-        v_is_reconstructed.push(evaluator.output_wire(&v_i).await);
+    let card_handles_64 = (0..PERM_SIZE)
+        .into_iter()
+        .map(|_| card_handles.clone())
+        .flatten()
+        .collect::<Vec<String>>();
 
-        // TODO: batch this
-        // Evaluation proofs of D_i at \omega^i to v_i 
+    let z_is_64 = (0..PERM_SIZE)
+        .into_iter()
+        .map(|i| vec![z_is[i].clone(); PERM_SIZE])
+        .flatten()
+        .collect::<Vec<String>>();
 
-        // Compute eval vector for z_i * card_shares
-        let mut d_i_evals = vec![];
+    let d_eval_handles = evaluator.batch_mult(
+        &card_handles_64, 
+        &z_is_64
+    ).await;
 
-        let d_i_eval_handles = evaluator.batch_mult(
-            &card_handles.clone(), 
-            &vec![z_i; 64]
-        ).await;
-
-        for j in 0..64 {
-            d_i_evals.push(evaluator.get_wire(&d_i_eval_handles[j]));
-        }
-
-        // Old loop without batching
-        // for j in 0..64 {
-        //     let tmp = evaluator.mult(
-        //         &card_handles[j].clone(), 
-        //         &z_i.clone()
-        //     ).await;
-
-        //     d_i_evals.push(evaluator.get_wire(&tmp));
-        // }
-
-        let d_i_poly_share = utils::interpolate_poly_over_mult_subgroup(
-            &d_i_evals
-        );
-
-        // Compute eval_proof for d_i
-        let pi_i = evaluator.eval_proof_with_share_poly(
-            pp, 
-            d_i_poly_share, 
-            utils::compute_power(&w, i as u64), 
-            format!("{}/{}", "enc_prove_pi_", i)
-        ).await;
-        
-        pi_is.push(pi_i);
-
-        // println!("encrypt_and_prove loop duration: {:?}", 
-        //     loop_start_time.elapsed()
-        // );
+    let mut d_evals = vec![];
+    for i in 0..d_eval_handles.len() {
+        d_evals.push(evaluator.get_wire(&d_eval_handles[i]));
     }
+
+    let d_evals = (0..PERM_SIZE)
+        .into_iter()
+        .map(|i| utils::interpolate_poly_over_mult_subgroup(&d_evals[i*PERM_SIZE..(i+1)*PERM_SIZE].to_vec()))
+        .collect::<Vec<DensePolynomial<F>>>();
+
+    // Compute eval_proof for d_is
+    let pi_is = evaluator.batch_eval_proof_with_share_poly(
+        pp, 
+        &d_evals, 
+        &(0..PERM_SIZE).into_iter().map(|i| utils::compute_power(&w, i as u64)).collect(), 
+        &(0..PERM_SIZE).into_iter().map(|i| format!("{}/{}", "enc_prove_pi_", i)).collect()
+    ).await;
+
+
+    // for i in 0..64 {
+    //     // Sample mask to be encrypted
+    //     let z_i = evaluator.ran();
+    //     z_is.push((z_i.clone(), evaluator.get_wire(&z_i.clone())));
+
+    //     // Encrypt the mask to id_i
+    //     let (c1_i, c2_i) = 
+    //         evaluator.dist_ibe_encrypt(
+    //             &z_i, 
+    //             &r, 
+    //             &pk, 
+    //             ids[i].clone()
+    //         ).await;
+    //     c1_is.push(c1_i);
+    //     c2_is.push(c2_i); 
+
+    //     // Compute d_i = C^z_i
+    //     let d_i = 
+    //         evaluator.exp_and_reveal_g1(
+    //             vec![card_commitment], 
+    //             vec![z_i.clone()], 
+    //             &format!("{}/{}", "enc_prove_D_", i)
+    //         ).await;
+    //     d_is.push(d_i.clone());
+
+    //     // Compute v_i = z_i * card_i
+    //     let v_i = evaluator.mult(&z_i, &card_handles[i]).await;        
+    //     v_is.push((v_i.clone(), evaluator.get_wire(&v_i)));
+    //     v_is_reconstructed.push(evaluator.output_wire(&v_i).await);
+
+    //     // TODO: batch this
+    //     // Evaluation proofs of D_i at \omega^i to v_i 
+
+    //     // Compute eval vector for z_i * card_shares
+    //     let mut d_i_evals = vec![];
+
+    //     let d_i_eval_handles = evaluator.batch_mult(
+    //         &card_handles.clone(), 
+    //         &vec![z_i; 64]
+    //     ).await;
+
+    //     for j in 0..64 {
+    //         d_i_evals.push(evaluator.get_wire(&d_i_eval_handles[j]));
+    //     }
+
+    //     // Old loop without batching
+    //     // for j in 0..64 {
+    //     //     let tmp = evaluator.mult(
+    //     //         &card_handles[j].clone(), 
+    //     //         &z_i.clone()
+    //     //     ).await;
+
+    //     //     d_i_evals.push(evaluator.get_wire(&tmp));
+    //     // }
+
+    //     let d_i_poly_share = utils::interpolate_poly_over_mult_subgroup(
+    //         &d_i_evals
+    //     );
+
+    //     // Compute eval_proof for d_i
+    //     let pi_i = evaluator.eval_proof_with_share_poly(
+    //         pp, 
+    //         d_i_poly_share, 
+    //         utils::compute_power(&w, i as u64), 
+    //         format!("{}/{}", "enc_prove_pi_", i)
+    //     ).await;
+        
+    //     pi_is.push(pi_i);
+
+    //     // println!("encrypt_and_prove loop duration: {:?}", 
+    //     //     loop_start_time.elapsed()
+    //     // );
+    // }
+
 
     // Hash to obtain randomness for batching
 
@@ -943,15 +1027,15 @@ async fn encrypt_and_prove(
         masked_commitments: d_is.clone(),
         masked_evals: v_is_reconstructed.clone(),
         eval_proofs: pi_is.clone(),
-        ciphertexts: c1_is.clone().into_iter().zip(c2_is.clone().into_iter()).collect(),
+        ciphertexts: c1s.clone().into_iter().zip(c2s.clone().into_iter()).collect(),
         sigma_proof: None,
     };
 
-    let s = utils::fs_hash(vec![&tmp_proof.to_bytes()], 64);
+    let s = utils::fs_hash(vec![&tmp_proof.to_bytes()], PERM_SIZE);
 
     // Compute batched pairing base for sigma proof
     let mut batch_h = G1::zero();
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         // TODO: fix this. Need proper hash to curve
         let x_f = F::from(ids[i].clone());
         let hash_id = G1::generator().mul(x_f);
@@ -961,8 +1045,8 @@ async fn encrypt_and_prove(
 
     let mut wit_1 = vec![];
     
-    for i in 0..64 {
-        wit_1.push(z_is[i].clone().0);
+    for i in 0..PERM_SIZE {
+        wit_1.push(z_is[i].clone());
     }
 
     let proof = dist_sigma_proof(
@@ -982,7 +1066,7 @@ async fn encrypt_and_prove(
         masked_commitments: d_is,
         masked_evals: v_is_reconstructed,
         eval_proofs: pi_is,
-        ciphertexts: c1_is.into_iter().zip(c2_is.into_iter()).collect(),
+        ciphertexts: c1s.into_iter().zip(c2s.into_iter()).collect(),
         sigma_proof: Some(proof),
     }
 }
@@ -993,18 +1077,18 @@ async fn local_verify_encryption_proof(
 ) -> bool {
     // Check that all ciphertexts share the same randomness
     let c1 = proof.ciphertexts[0].0.clone();
-    for i in 1..64 {
+    for i in 1..PERM_SIZE {
         if proof.ciphertexts[i].0 != c1 {
             return false;
         }
     }
 
     // Check all the evaluation proofs
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         if utils::kzg_check(
             pp,
             &proof.masked_commitments[i], 
-            &utils::compute_power(&utils::multiplicative_subgroup_of_size(64), i as u64), 
+            &utils::compute_power(&utils::multiplicative_subgroup_of_size(PERM_SIZE as u64), i as u64), 
             &proof.masked_evals[i], 
             &proof.eval_proofs[i]
         ) == false {
@@ -1014,12 +1098,12 @@ async fn local_verify_encryption_proof(
 
     // Check the sigma proof
     // Hash to obtain randomness for batching
-    let s = utils::fs_hash(vec![&proof.to_bytes()], 64);
+    let s = utils::fs_hash(vec![&proof.to_bytes()], PERM_SIZE);
 
     // Compute e_batch
     let mut e_batch = Gt::zero();
 
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         let x_f = F::from(proof.ids[i].clone());
         let hash_id = G1::generator().mul(x_f);
 
@@ -1031,14 +1115,14 @@ async fn local_verify_encryption_proof(
     // Compute d_batch
     let mut d_batch = G1::zero();
 
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         d_batch = d_batch.add(proof.masked_commitments[i].mul(s[i])).into_affine();
     }
 
     // Compute c2_batch
     let mut c2_batch = Gt::zero();
 
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         c2_batch = c2_batch.add(proof.ciphertexts[i].1.mul(s[i]));
     }    
 
@@ -1065,7 +1149,7 @@ pub async fn test_sigma(evaluator: &mut Evaluator) {
     let mut lin_comb_ran = vec![];
     let wit_2_handle = evaluator.ran();
 
-    for _ in 0..64 {
+    for _ in 0..PERM_SIZE {
         wit_1_handles.push(evaluator.ran());
         lin_comb_ran.push(F::rand(&mut ark_std::test_rng()));
     }
@@ -1073,7 +1157,7 @@ pub async fn test_sigma(evaluator: &mut Evaluator) {
     let mut d_i = vec![];
     let mut d_batch = G1::zero();
 
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         d_i.push(evaluator.exp_and_reveal_g1(
             vec![G1::generator().mul(F::from(20)).into_affine()], 
             vec![wit_1_handles[i].clone()], 
@@ -1087,7 +1171,7 @@ pub async fn test_sigma(evaluator: &mut Evaluator) {
     let mut e_batch = Gt::zero();
     let mut c2_batch = Gt::zero();
 
-    for i in 0..64 {
+    for i in 0..PERM_SIZE {
         let e_i = Gt::generator().mul(F::from(i as u64));
         e_batch = e_batch.add(e_i.mul(lin_comb_ran[i]));
 
@@ -1137,7 +1221,7 @@ pub fn test_local_kzg() {
 
     let point: F = F::rand(&mut rng);
 
-    for _ in 0..64 {
+    for _ in 0..PERM_SIZE {
         let tmp = F::rand(&mut rng);
         evals.push(tmp);
     }
@@ -1171,7 +1255,7 @@ pub async fn test_dist_kzg(evaluator: &mut Evaluator) {
     let mut evals = vec![];
     // let mut actual_evals = vec![];
 
-    for _ in 0..64 {
+    for _ in 0..PERM_SIZE {
         let tmp = evaluator.ran();
         evals.push(evaluator.get_wire(&tmp));
         // actual_evals.push(evaluator.output_wire(&tmp).await);
@@ -1184,7 +1268,7 @@ pub async fn test_dist_kzg(evaluator: &mut Evaluator) {
     let com_share = utils::commit_poly(&pp, &poly);
     let com = evaluator.add_g1_elements_from_all_parties(&com_share, &String::from("kzg_test_com")).await;
 
-    let w = utils::multiplicative_subgroup_of_size(64);
+    let w = utils::multiplicative_subgroup_of_size(PERM_SIZE as u64);
     let pi = evaluator.eval_proof_with_share_poly(&pp, poly.clone(), w, String::from("kzg_test_pi")).await;
 
     let evaluation_at_w = evaluator.share_poly_eval(poly.clone(), w).await;
@@ -1200,7 +1284,7 @@ async fn test_share_poly_mult(evaluator: &mut Evaluator) {
     let mut share_evals_1 = vec![];
     let mut share_evals_2 = vec![];
 
-    for _ in 0..64 {
+    for _ in 0..PERM_SIZE {
         let tmp = evaluator.ran();
         share_evals_1.push(evaluator.get_wire(&tmp));
         let tmp = evaluator.ran();

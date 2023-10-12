@@ -168,7 +168,7 @@ impl Evaluator {
             }
         
             let mut l = a_exp_64s[i];
-            for _ in 0..6 {
+            for _ in 0..LOG_PERM_SIZE {
                 l = utils::compute_root(&l);
             }
 
@@ -833,7 +833,7 @@ impl Evaluator {
 
     pub async fn batch_exp(&mut self, input_labels: &[String]) -> Vec<String> {
         let mut tmp = input_labels.to_vec();
-        for _i in 0..6 {
+        for _i in 0..LOG_PERM_SIZE {
             tmp = self.batch_mult(
                 &tmp, 
                 &tmp
@@ -898,6 +898,39 @@ impl Evaluator {
         pi
     }
 
+    pub async fn batch_eval_proof_with_share_poly(
+        &mut self, 
+        pp: &UniversalParams<Curve>, 
+        share_polys: &Vec<DensePolynomial<F>>, 
+        z_s: &Vec<F>, 
+        f_names: &Vec<String>
+    ) -> Vec<G1> {
+        let len = share_polys.len();
+        assert_eq!(len, f_names.len());
+
+        let mut pi_share_vec = Vec::new();
+        for i in 0..len {
+            // Compute f_polynomial
+            let f_poly = share_polys[i].clone();
+
+            let divisor = DensePolynomial::from_coefficients_vec(
+                vec![-z_s[i], F::from(1)]
+            );
+
+            // Divide by (X-z_i)
+            let (quotient, _remainder) = 
+                DenseOrSparsePolynomial::divide_with_q_and_r(
+                    &(&f_poly).into(),
+                    &(&divisor).into(),
+                ).unwrap();
+
+            let pi_poly = utils::commit_poly(pp, &quotient);
+            pi_share_vec.push(pi_poly);
+        }
+
+        self.batch_add_g1_elements_from_all_parties(&pi_share_vec, &f_names).await
+    }
+
     pub async fn dist_ibe_encrypt(
         &mut self, 
         msg_share_handle: &String, // [z1]
@@ -929,15 +962,58 @@ impl Evaluator {
         (c1, c2)
     }
 
-    // pub async fn batch_dist_ibe_encrypt(
-    //     &mut self, 
-    //     msg_share_handles: &[String], // [z1]
-    //     mask_share_handles: &[String], // [r]
-    //     pk: &G2, 
-    //     id: BigUint
-    // ) -> (Vec<G1>, Vec<Gt>) {
-    //     assert_eq!(msg_share_handles.len(), mask_share_handles.len());
-    // }
+    pub async fn batch_dist_ibe_encrypt(
+        &mut self, 
+        msg_share_handles: &[String], // [z1]
+        mask_share_handles: &[String], // [r]
+        pk: &G2, 
+        ids: &[BigUint]
+    ) -> (Vec<G1>, Vec<Gt>) {
+        assert_eq!(msg_share_handles.len(), mask_share_handles.len());
+
+        let e_is = ids
+            .iter()
+            .map(|id| {
+                let x_f = F::from(id.clone());
+                let hash_id = G1::generator().mul(x_f);
+
+                <Curve as Pairing>::pairing(hash_id, pk)
+            })
+            .collect::<Vec<Gt>>();
+
+        let c1s = self.batch_exp_and_reveal_g1(
+            vec![vec![<Curve as Pairing>::G1Affine::generator()]; msg_share_handles.len()], 
+            vec![mask_share_handles.to_vec(); PERM_SIZE], 
+            msg_share_handles
+                .iter()
+                .map(|h| String::from("ibe_c1_".to_owned() + h))
+                .collect::<Vec<String>>()
+        ).await;
+
+        // Vector of 64 elements, where the i^th element is a vector [g, e_i]
+        let gt_with_e_is = (0..msg_share_handles.len())
+            .into_iter()
+            .map(|i| vec![Gt::generator(), e_is[i].clone()])
+            .collect::<Vec<Vec<Gt>>>();
+
+        // Vector of 64 elements, where the i^th element is a vector [msg_i, mask_i]
+        let msg_mask_interleaved = msg_share_handles
+            .iter()
+            .zip(mask_share_handles.iter())
+            .map(|(m, r)| vec![m.clone(), r.clone()])
+            .collect::<Vec<Vec<String>>>();
+
+        let c2s = self.batch_exp_and_reveal_gt(
+            gt_with_e_is, 
+            msg_mask_interleaved, 
+            msg_share_handles
+                .iter()
+                .map(|h| String::from("ibe_c2".to_owned() + h))
+                .collect::<Vec<String>>()
+        ).await;
+
+        (c1s, c2s)
+    }
 
     //returns the handle which 
     fn process_next_message(&mut self, msg: &EvalNetMsg) {
