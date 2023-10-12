@@ -3,9 +3,9 @@ use num_bigint::BigUint;
 use serde::{Serialize, Deserialize};
 use crate::evaluator::*;
 
-pub const PERM_SIZE: usize = 32;
-pub const DECK_SIZE: usize = 30;
-pub const LOG_PERM_SIZE: usize = 5;
+pub const PERM_SIZE: usize = 64;
+pub const DECK_SIZE: usize = 52;
+pub const LOG_PERM_SIZE: usize = 6;
 
 /// EvalNetMsg represents the types of messages that
 /// we expect to flow between the evaluator and networkd

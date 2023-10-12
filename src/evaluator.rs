@@ -542,12 +542,27 @@ impl Evaluator {
             values.push(encode_f_as_bs58_str(&self.get_wire(&wire_handles[i])));
         }
 
-        let msg = EvalNetMsg::PublishBatchValue {
-            sender: self.id.clone(),
-            handles: handles,
-            values: values,
-        };
-        send_over_network!(msg, self.tx);
+        if len > 256 && len % 256 == 0 {
+            let num_buckets_of_size_256 = len / 256;
+            for i in 0..num_buckets_of_size_256 {
+                let handles_bucket = &handles[256*i..256*(i+1)].to_vec();
+                let values_bucket = &values[256*i..256*(i+1)].to_vec();
+
+                let msg = EvalNetMsg::PublishBatchValue {
+                    sender: self.id.clone(),
+                    handles: handles_bucket.to_owned(),
+                    values: values_bucket.to_owned(),
+                };
+                send_over_network!(msg, self.tx);
+            }
+        } else {
+            let msg = EvalNetMsg::PublishBatchValue {
+                sender: self.id.clone(),
+                handles: handles,
+                values: values,
+            };
+            send_over_network!(msg, self.tx);
+        }
 
         for i in 0..len {
             let incoming_msgs = self.collect_messages_from_all_peers(&wire_handles[i]).await;
