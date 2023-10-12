@@ -543,8 +543,7 @@ impl Evaluator {
         }
 
         if len > 256 && len % 256 == 0 {
-            let num_buckets_of_size_256 = len / 256;
-            for i in 0..num_buckets_of_size_256 {
+            for i in 0..len / 256 {
                 let handles_bucket = &handles[256*i..256*(i+1)].to_vec();
                 let values_bucket = &values[256*i..256*(i+1)].to_vec();
 
