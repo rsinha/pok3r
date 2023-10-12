@@ -183,7 +183,7 @@ async fn main() {
     netd_handle.join().unwrap();
 }
 
-fn map_roots_of_unity_to_cards() -> HashMap<F, String> {
+fn _map_roots_of_unity_to_cards() -> HashMap<F, String> {
     let mut output: HashMap<F, String> = HashMap::new();
     
     // get generator for the 64 powers of 64-th root of unity
@@ -801,91 +801,151 @@ async fn encrypt_and_prove(
 
     // Sample common randomness for encryption
     let r = evaluator.ran();
-
-    let mut z_is = vec![]; //vector of (handle, share_value) pairs
-    let mut d_is = vec![]; //vector of scaled commitments 
-    let mut v_is = vec![]; //vector of (handle, share_value) pairs
-    let mut v_is_reconstructed = vec![]; //vector of reconstructed v_i values
-    let mut pi_is = vec![]; //vector of evaluation proofs
-
-    let mut c1_is = vec![]; //vector of ciphertexts
-    let mut c2_is = vec![]; //vector of ciphertexts
-
     let w = utils::multiplicative_subgroup_of_size(64);
 
+    // Sample masks to be encrypted
+    let z_is = (0..64)
+        .into_iter()
+        .map(|_i| evaluator.ran())
+        .collect::<Vec<String>>();
+
+    // Encrypt the masks to ids
+    let (c1s, c2s) = evaluator.batch_dist_ibe_encrypt(
+        &z_is, 
+        &vec![r.clone(); 64], 
+        &pk, 
+        ids.as_slice()
+    ).await;
+
+    // Compute d_i = C^z_i
+    let d_is = evaluator.batch_exp_and_reveal_g1(
+        vec![vec![card_commitment]; 64], 
+        z_is.clone().into_iter().map(|x| vec![x]).collect(), 
+        (0..64).into_iter().map(|i| format!("{}/{}", "enc_prove_D_", i)).collect()
+    ).await;
+
+    // Compute v_i = z_i * card_i
+    let v_is = evaluator.batch_mult(
+        &z_is, 
+        &card_handles
+    ).await;
+
+    let v_is_reconstructed = evaluator.batch_output_wire(&v_is).await;
+
+    // Compute eval vector for z_i * card_shares
+    // each elem of vector - [batchmult(cards, z_i*64)]
+    // make it one vector - batchmult([cards * 64], [z1*64, z2*64, ])
+
+    let card_handles_64 = (0..64)
+        .into_iter()
+        .map(|_| card_handles.clone())
+        .flatten()
+        .collect::<Vec<String>>();
+
+    let z_is_64 = (0..64)
+        .into_iter()
+        .map(|i| vec![z_is[i].clone(); 64])
+        .flatten()
+        .collect::<Vec<String>>();
+
+    let d_eval_handles = evaluator.batch_mult(
+        &card_handles_64, 
+        &z_is_64
+    ).await;
+
+    let mut d_evals = vec![];
     for i in 0..64 {
-        // Sample mask to be encrypted
-        let z_i = evaluator.ran();
-        z_is.push((z_i.clone(), evaluator.get_wire(&z_i.clone())));
-
-        // Encrypt the mask to id_i
-        let (c1_i, c2_i) = 
-            evaluator.dist_ibe_encrypt(
-                &z_i, 
-                &r, 
-                &pk, 
-                ids[i].clone()
-            ).await;
-        c1_is.push(c1_i);
-        c2_is.push(c2_i); 
-
-        // Compute d_i = C^z_i
-        let d_i = 
-            evaluator.exp_and_reveal_g1(
-                vec![card_commitment], 
-                vec![z_i.clone()], 
-                &format!("{}/{}", "enc_prove_D_", i)
-            ).await;
-        d_is.push(d_i.clone());
-
-        // Compute v_i = z_i * card_i
-        let v_i = evaluator.mult(&z_i, &card_handles[i]).await;        
-        v_is.push((v_i.clone(), evaluator.get_wire(&v_i)));
-        v_is_reconstructed.push(evaluator.output_wire(&v_i).await);
-
-        // TODO: batch this
-        // Evaluation proofs of D_i at \omega^i to v_i 
-
-        // Compute eval vector for z_i * card_shares
-        let mut d_i_evals = vec![];
-
-        let d_i_eval_handles = evaluator.batch_mult(
-            &card_handles.clone(), 
-            &vec![z_i; 64]
-        ).await;
-
-        for j in 0..64 {
-            d_i_evals.push(evaluator.get_wire(&d_i_eval_handles[j]));
-        }
-
-        // Old loop without batching
-        // for j in 0..64 {
-        //     let tmp = evaluator.mult(
-        //         &card_handles[j].clone(), 
-        //         &z_i.clone()
-        //     ).await;
-
-        //     d_i_evals.push(evaluator.get_wire(&tmp));
-        // }
-
-        let d_i_poly_share = utils::interpolate_poly_over_mult_subgroup(
-            &d_i_evals
-        );
-
-        // Compute eval_proof for d_i
-        let pi_i = evaluator.eval_proof_with_share_poly(
-            pp, 
-            d_i_poly_share, 
-            utils::compute_power(&w, i as u64), 
-            format!("{}/{}", "enc_prove_pi_", i)
-        ).await;
-        
-        pi_is.push(pi_i);
-
-        // println!("encrypt_and_prove loop duration: {:?}", 
-        //     loop_start_time.elapsed()
-        // );
+        d_evals.push(evaluator.get_wire(&d_eval_handles[i]));
     }
+
+    let d_evals = (0..64)
+        .into_iter()
+        .map(|i| utils::interpolate_poly_over_mult_subgroup(&d_evals[i*64..(i+1)*64].to_vec()))
+        .collect::<Vec<DensePolynomial<F>>>();
+
+    // Compute eval_proof for d_is
+    let pi_is = evaluator.batch_eval_proof_with_share_poly(
+        pp, 
+        &d_evals, 
+        &(0..64).into_iter().map(|i| utils::compute_power(&w, i as u64)).collect(), 
+        &(0..64).into_iter().map(|i| format!("{}/{}", "enc_prove_pi_", i)).collect()
+    ).await;
+
+
+    // for i in 0..64 {
+    //     // Sample mask to be encrypted
+    //     let z_i = evaluator.ran();
+    //     z_is.push((z_i.clone(), evaluator.get_wire(&z_i.clone())));
+
+    //     // Encrypt the mask to id_i
+    //     let (c1_i, c2_i) = 
+    //         evaluator.dist_ibe_encrypt(
+    //             &z_i, 
+    //             &r, 
+    //             &pk, 
+    //             ids[i].clone()
+    //         ).await;
+    //     c1_is.push(c1_i);
+    //     c2_is.push(c2_i); 
+
+    //     // Compute d_i = C^z_i
+    //     let d_i = 
+    //         evaluator.exp_and_reveal_g1(
+    //             vec![card_commitment], 
+    //             vec![z_i.clone()], 
+    //             &format!("{}/{}", "enc_prove_D_", i)
+    //         ).await;
+    //     d_is.push(d_i.clone());
+
+    //     // Compute v_i = z_i * card_i
+    //     let v_i = evaluator.mult(&z_i, &card_handles[i]).await;        
+    //     v_is.push((v_i.clone(), evaluator.get_wire(&v_i)));
+    //     v_is_reconstructed.push(evaluator.output_wire(&v_i).await);
+
+    //     // TODO: batch this
+    //     // Evaluation proofs of D_i at \omega^i to v_i 
+
+    //     // Compute eval vector for z_i * card_shares
+    //     let mut d_i_evals = vec![];
+
+    //     let d_i_eval_handles = evaluator.batch_mult(
+    //         &card_handles.clone(), 
+    //         &vec![z_i; 64]
+    //     ).await;
+
+    //     for j in 0..64 {
+    //         d_i_evals.push(evaluator.get_wire(&d_i_eval_handles[j]));
+    //     }
+
+    //     // Old loop without batching
+    //     // for j in 0..64 {
+    //     //     let tmp = evaluator.mult(
+    //     //         &card_handles[j].clone(), 
+    //     //         &z_i.clone()
+    //     //     ).await;
+
+    //     //     d_i_evals.push(evaluator.get_wire(&tmp));
+    //     // }
+
+    //     let d_i_poly_share = utils::interpolate_poly_over_mult_subgroup(
+    //         &d_i_evals
+    //     );
+
+    //     // Compute eval_proof for d_i
+    //     let pi_i = evaluator.eval_proof_with_share_poly(
+    //         pp, 
+    //         d_i_poly_share, 
+    //         utils::compute_power(&w, i as u64), 
+    //         format!("{}/{}", "enc_prove_pi_", i)
+    //     ).await;
+        
+    //     pi_is.push(pi_i);
+
+    //     // println!("encrypt_and_prove loop duration: {:?}", 
+    //     //     loop_start_time.elapsed()
+    //     // );
+    // }
+
 
     // Hash to obtain randomness for batching
 
@@ -896,7 +956,7 @@ async fn encrypt_and_prove(
         masked_commitments: d_is.clone(),
         masked_evals: v_is_reconstructed.clone(),
         eval_proofs: pi_is.clone(),
-        ciphertexts: c1_is.clone().into_iter().zip(c2_is.clone().into_iter()).collect(),
+        ciphertexts: c1s.clone().into_iter().zip(c2s.clone().into_iter()).collect(),
         sigma_proof: None,
     };
 
@@ -915,7 +975,7 @@ async fn encrypt_and_prove(
     let mut wit_1 = vec![];
     
     for i in 0..64 {
-        wit_1.push(z_is[i].clone().0);
+        wit_1.push(z_is[i].clone());
     }
 
     let proof = dist_sigma_proof(
@@ -935,7 +995,7 @@ async fn encrypt_and_prove(
         masked_commitments: d_is,
         masked_evals: v_is_reconstructed,
         eval_proofs: pi_is,
-        ciphertexts: c1_is.into_iter().zip(c2_is.into_iter()).collect(),
+        ciphertexts: c1s.into_iter().zip(c2s.into_iter()).collect(),
         sigma_proof: Some(proof),
     }
 }
