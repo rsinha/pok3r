@@ -24,8 +24,6 @@ use address_book::*;
 use evaluator::*;
 use common::*;
 
-const SET_SIZE: usize = 64;
-const NUM_CARDS: usize = 52;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -795,8 +793,6 @@ async fn encrypt_and_prove(
     let w = utils::multiplicative_subgroup_of_size(64);
 
     for i in 0..64 {
-        let loop_start_time = Instant::now();
-
         // Sample mask to be encrypted
         let z_i = evaluator.ran();
         z_is.push((z_i.clone(), evaluator.get_wire(&z_i.clone())));
