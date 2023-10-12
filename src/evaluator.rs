@@ -682,6 +682,44 @@ impl Evaluator {
         sum
     }
 
+    pub async fn batch_add_gt_elements_from_all_parties(
+        &mut self,
+        inputs: &[Gt],
+        identifiers: &[String]
+    ) -> Vec<Gt> {
+        assert_eq!(inputs.len(), identifiers.len());
+
+        let mut outputs = Vec::new();
+
+        let values = inputs
+            .into_iter()
+            .map(|e| encode_gt_as_bs58_str(e))
+            .collect();
+
+        let msg = EvalNetMsg::PublishBatchValue {
+            sender: self.id.clone(),
+            handles: identifiers.into(),
+            values: values,
+        };
+        send_over_network!(msg, self.tx);
+
+        for i in 0..inputs.len() {
+            let incoming_msgs = self.collect_messages_from_all_peers(&identifiers[i]).await;
+            let incoming_values: Vec<Gt> = incoming_msgs
+                .into_iter()
+                .map(|x| decode_bs58_str_as_gt(&x))
+                .collect();
+
+            let sum = incoming_values
+                .iter()
+                .fold(inputs[i], |acc, v| acc.add(v));
+
+            outputs.push(sum);
+        }
+
+        outputs
+    }
+
     // secret-shared MSM, where scalars are secret shares. Outputs MSM in the clear.
     pub async fn exp_and_reveal_gt(
         &mut self, 
@@ -700,6 +738,34 @@ impl Evaluator {
         }
 
         self.add_gt_elements_from_all_parties(&sum, func_name).await
+    }
+
+    pub async fn batch_exp_and_reveal_gt(
+        &mut self, 
+        bases: Vec<Vec<Gt>>,
+        exponent_handles: Vec<Vec<String>>,
+        identifiers: Vec<String>
+    ) -> Vec<Gt> {
+        let len = bases.len();
+
+        assert_eq!(len, exponent_handles.len());
+        assert_eq!(len, identifiers.len());
+
+        let mut group_elements = vec![];
+
+        for i in 0..len {
+            let msm_input = bases[i].iter().zip(exponent_handles[i].iter());
+            let mut sum = Gt::zero();
+
+            for (base, exponent_handle) in msm_input {
+                let exponentiated = base.mul(self.get_wire(exponent_handle));
+                sum = sum.add(exponentiated);
+            }
+
+            group_elements.push(sum);
+        }
+
+        self.batch_add_gt_elements_from_all_parties(&group_elements, &identifiers).await
     }
 
     // secret-shared MSM, where scalars are secret shares. Outputs MSM in the clear.
