@@ -152,6 +152,35 @@ impl Evaluator {
         h_c
     }
 
+    pub async fn batch_ran_64(&mut self, len: usize) -> Vec<String> {
+        let mut h_c = Vec::new();
+        let h_as = (0..len)
+            .into_iter()
+            .map(|_| self.ran())
+            .collect::<Vec<String>>();
+
+        let h_a_exp_64s = self.batch_exp(&h_as).await;
+        let a_exp_64s = self.batch_output_wire(&h_a_exp_64s).await;
+
+        for i in 0..len {
+            if a_exp_64s[i] == F::from(0) {
+                panic!("Highly improbable event occurred. Abort!");
+            }
+        
+            let mut l = a_exp_64s[i];
+            for _ in 0..6 {
+                l = utils::compute_root(&l);
+            }
+
+            let handle = self.compute_fresh_wire_label();
+            let share_c = self.get_wire(&h_as[i]) / l;
+            self.wire_shares.insert(handle.clone(), share_c);
+            h_c.push(handle);
+        }
+
+        h_c
+    }
+
     /// outputs the wire label denoting the [x] + [y]
     pub fn add(&mut self, 
         handle_x: &String, 
@@ -550,6 +579,21 @@ impl Evaluator {
         ).await
     }
 
+    pub async fn batch_output_wire_in_exponent(&mut self, wire_handles: &[String]) -> Vec<G1> {
+        let mut my_share_exps = Vec::new();
+        let g = <Curve as Pairing>::G1Affine::generator();
+        for i in 0..wire_handles.len() {
+            let my_share = self.get_wire(&wire_handles[i]);
+            let my_share_exp = g.clone().mul(my_share).into_affine();
+            my_share_exps.push(my_share_exp);
+        }
+
+        self.batch_add_g1_elements_from_all_parties(
+            &my_share_exps, 
+            wire_handles
+        ).await
+    }
+
     // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
     pub async fn add_g1_elements_from_all_parties(
         &mut self, value: &G1, 
@@ -691,6 +735,25 @@ impl Evaluator {
         let handle = self.compute_fresh_wire_label();
         self.wire_shares.insert(handle.clone(), self.get_wire(&tmp));
         handle
+    }
+
+    pub async fn batch_exp(&mut self, input_labels: &[String]) -> Vec<String> {
+        let mut tmp = input_labels.to_vec();
+        for _i in 0..6 {
+            tmp = self.batch_mult(
+                &tmp, 
+                &tmp
+            ).await;
+        }
+
+        let mut output = Vec::new();
+        for i in 0..input_labels.len() {
+            let handle = self.compute_fresh_wire_label();
+            self.wire_shares.insert(handle.clone(), self.get_wire(&tmp[i]));
+            output.push(handle);
+        }
+
+        output
     }
 
     pub fn get_wire(&self, handle: &String) -> F {

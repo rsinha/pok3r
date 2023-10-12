@@ -214,41 +214,87 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
 
     // Compute prfs for cards 52 to 63 and add to prfs first
     // So that the positions of these cards are fixed in the permutation
+
+    let ω = utils::multiplicative_subgroup_of_size(64);
+    let powers_of_ω = (0..64)
+        .into_iter()
+        .map(|i| utils::compute_power(&ω, i as u64))
+        .collect::<Vec<F>>();
+
+    // y_i = g^{1 / (sk + w_i)}
+    let denoms = (0..64)
+        .into_iter()
+        .map(|i| evaluator.clear_add(&sk, powers_of_ω[i]))
+        .collect::<Vec<String>>();
+
+    let t_is = evaluator.batch_inv(&denoms).await;
+    let y_is = evaluator.batch_output_wire_in_exponent(&t_is).await;
+
     for i in 52..64 {
-        let ω = utils::multiplicative_subgroup_of_size(64);
-        let ω_pow_i = utils::compute_power(&ω, i as u64);
-
-        // y_i = g^{1 / (sk + w_i)}
-        let denom = evaluator.clear_add(&sk, ω_pow_i);
-        let t_i = evaluator.inv(&denom).await;
-        let y_i = evaluator.output_wire_in_exponent(&t_i).await;
-
-        prfs.insert(y_i.clone());
-        let handle = evaluator.fixed_wire_handle(ω_pow_i).await;
+        prfs.insert(y_is[i].clone());
+        let handle = evaluator.fixed_wire_handle(powers_of_ω[i]).await;
         card_share_handles.push(handle.clone());
         card_share_values.push(evaluator.get_wire(&handle));
     }
+    
+    // Compute the random permutation - try for num_tries to get the other 52 cards
+    let num_tries = 300;
 
-    // TODO : After batching, this cannot be variable - must run ~1275 times or so to get enough cards with high probability
-    while card_share_values.len() < 64 { // until you get the other 52 cards
-        let a_i = evaluator.ran();
-        let c_i = evaluator.ran_64(&a_i).await;
-        let t_i = evaluator.add(&c_i, &sk);
-        let t_i = evaluator.inv(&t_i).await;
+    let c_is = evaluator.batch_ran_64(num_tries).await;
+    let t_is = (0..num_tries)
+        .into_iter()
+        .map(|i| evaluator.add(&c_is[i], &sk))
+        .collect::<Vec<String>>();
+    let t_is = evaluator.batch_inv(&t_is).await;
 
-        // y_i = g^{1 / (sk + w_i)}
-        let y_i = evaluator.output_wire_in_exponent(&t_i).await;
+    let y_is = evaluator.batch_output_wire_in_exponent(&t_is).await;
 
+    for i in 0..num_tries {
         //add card if it hasnt been seen before
-        if ! prfs.contains(&y_i) {
-            prfs.insert(y_i.clone());
-            card_share_handles.push(c_i.clone());
-            card_share_values.push(evaluator.get_wire(&c_i));
+        if ! prfs.contains(&y_is[i]) {
+            prfs.insert(y_is[i].clone());
+            card_share_handles.push(c_is[i].clone());
+            card_share_values.push(evaluator.get_wire(&c_is[i]));
         }
     }
 
-    // TODO - after batching, check that the length of card_share_values and handles are 64 and panic if not
+    // Assert that the length is 64
+    assert_eq!(card_share_handles.len(), 64, "We don't have enough cards - try again");
+
     return (card_share_handles.clone(), card_share_values);
+
+    // Pre-batched version
+    
+    // for i in 52..64 {
+    //     let ω_pow_i = utils::compute_power(&ω, i as u64);
+    //     // y_i = g^{1 / (sk + w_i)}
+    //     let denom = evaluator.clear_add(&sk, ω_pow_i);
+    //     let t_i = evaluator.inv(&denom).await;
+    //     let y_i = evaluator.output_wire_in_exponent(&t_i).await;
+
+    //     prfs.insert(y_i.clone());
+    //     let handle = evaluator.fixed_wire_handle(ω_pow_i).await;
+    //     card_share_handles.push(handle.clone());
+    //     card_share_values.push(evaluator.get_wire(&handle));
+    // }
+
+    // // TODO : After batching, this cannot be variable - must run ~1275 times or so to get enough cards with high probability
+    // while card_share_values.len() < 64 { // until you get the other 52 cards
+    //     let a_i = evaluator.ran();
+    //     let c_i = evaluator.ran_64(&a_i).await;
+    //     let t_i = evaluator.add(&c_i, &sk);
+    //     let t_i = evaluator.inv(&t_i).await;
+
+    //     // y_i = g^{1 / (sk + w_i)}
+    //     let y_i = evaluator.output_wire_in_exponent(&t_i).await;
+
+    //     //add card if it hasnt been seen before
+    //     if ! prfs.contains(&y_i) {
+    //         prfs.insert(y_i.clone());
+    //         card_share_handles.push(c_i.clone());
+    //         card_share_values.push(evaluator.get_wire(&c_i));
+    //     }
+    // }
 }
 
 async fn compute_permutation_argument(
