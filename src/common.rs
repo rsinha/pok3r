@@ -6,6 +6,7 @@ use crate::evaluator::*;
 pub const PERM_SIZE: usize = 64;
 pub const DECK_SIZE: usize = 52;
 pub const LOG_PERM_SIZE: usize = 6;
+pub const NUM_SAMPLES: usize = 400;
 
 /// EvalNetMsg represents the types of messages that
 /// we expect to flow between the evaluator and networkd
