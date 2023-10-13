@@ -5,7 +5,6 @@ use ark_poly::{ GeneralEvaluationDomain, EvaluationDomain, Polynomial, univariat
 use ark_serialize::CanonicalSerialize;
 use ark_std::{Zero, One, UniformRand};
 use async_std::task;
-//use std::sync::mpsc;
 use futures::channel::*;
 use clap::Parser;
 use kzg::UniversalParams;
@@ -37,6 +36,10 @@ struct Args {
     /// Fixed value to generate deterministic peer id
     #[clap(long)]
     seed: u8,
+
+    /// number of parties doing the mpc
+    #[clap(long)]
+    parties: u64,
 }
 
 /*
@@ -105,34 +108,62 @@ Seed 62 peer id: 12D3KooWSK6f2ZJLRX8Q3LiuVnj9y3yXqJgFguJh7gdjtsSomnS8
 Seed 63 peer id: 12D3KooWHV2zfje5uXRV5nPsqArHdrVrh7GaAJVyhwr8ffZZ16om
 */
 
-fn parse_addr_book_from_json() -> Pok3rAddrBook {
+fn parse_addr_book_from_json(num_parties: u64) -> Pok3rAddrBook {
     let config = json!({
         "addr_book": [ //addr_book is a list of ed25519 pubkeys
-            "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X", //pubkey of node with seed 1
-            "12D3KooWH3uVF6wv47WnArKHk5p6cvgCJEb74UTmxztmQDc298L3", //pubkey of node with seed 2
-            "12D3KooWQYhTNQdmr3ArTeUHRYzFg94BKyTkoWBDWez9kSCVe2Xo", //pubkey of node with seed 3
-            "12D3KooWLJtG8fd2hkQzTn96MrLvThmnNQjTUFZwGEsLRz5EmSzc"  //pubkey of node with seed 4
+            "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X",
+            "12D3KooWH3uVF6wv47WnArKHk5p6cvgCJEb74UTmxztmQDc298L3",
+            "12D3KooWQYhTNQdmr3ArTeUHRYzFg94BKyTkoWBDWez9kSCVe2Xo",
+            "12D3KooWLJtG8fd2hkQzTn96MrLvThmnNQjTUFZwGEsLRz5EmSzc",
+            "12D3KooWSHj3RRbBjD15g6wekV8y3mm57Pobmps2g2WJm6F67Lay",
+            "12D3KooWDMCQbZZvLgHiHntG1KwcHoqHPAxL37KvhgibWqFtpqUY",
+            "12D3KooWLnZUpcaBwbz9uD1XsyyHnbXUrJRmxnsMiRnuCmvPix67",
+            "12D3KooWQ8vrERR8bnPByEjjtqV6hTWehaf8TmK7qR1cUsyrPpfZ",
+            "12D3KooWNRk8VBuTJTYyTbnJC7Nj2UN5jij4dJMo8wtSGT2hRzRP",
+            "12D3KooWFHNBwTxUgeHRcD3g4ieiXBmZGVyp6TKGWRKKEqYgCC1C",
+            "12D3KooWHbEputWi1fJAxoYgmvvDe3yP7acTACqmXKGYwMgN2daQ",
+            "12D3KooWCxnyz1JxC9y1RniRQVFe2cLaLHsYNc2SnXbM7yq5JBbJ",
+            "12D3KooWFNisMCMFB4sxKjQ4VLoTrMYh7fUJqXr1FMwhqAwfdxPS",
+            "12D3KooW9ubkfzRCQrUvcgvSqL2Cpri5pPV9DuyoHptvshVcNE9h",
+            "12D3KooWRVJCFqFBrasjtcGHnRuuut9fQLsfcUNLfWFFqjMm2p4n",
+            "12D3KooWGtVQAq3A8GPyq5ZuwBoE4V278EkDpETijz1dm7cY4LsG",
+            "12D3KooWGjxVp88DuWx6P6cN5ZLtud51TNWK6a7K1h9cYb8qDuci",
+            "12D3KooWDWC9G1REgGwHTzVNtXL8x6okkRQzsYb7V9mw9UGKhC1H",
+            "12D3KooWE92WS4t4UBFxryqsx78hSaFaZMLaAkRwkynjsL1mdt8h",
+            "12D3KooWPcbijTPjNkihfs3DcJiMb1iQC1B2BCzP3vSggGvUgZsC",
+            "12D3KooWE1hRi1pECQ6bfxmeybMFEtYcTjJuhjxc75dZZLXwrdwy",
+            "12D3KooWCxkD42pVy9VZXGPQgBmL2ekc9kxME5YwriN3xTN6aBMx",
+            "12D3KooWFYZ24pnTgzhPJmznbMQTv8g9xdJANuM8wjkbCGrhWDvP",
+            "12D3KooWSM6emJRiK1AzUG39eFW42k8AUKLCk3fTFLh7GU1hPMFs",
+            "12D3KooWM7du63Ft3U51pDpJqNyiGRVU3Us2f4iuiwUEyxsB5P2M",
+            "12D3KooWCTvrtiEPSzY2UixVRuxVc81TGZjYHGU8YkJ7wuBrRRU8",
+            "12D3KooWNLMpwyVysPSUj93RqpTDMxv5V9AsXc7NPgZPRUg4qD28",
+            "12D3KooWJQK2dHWVMKPm9e1RPYgtQeix1hmS84B87rzhCP3uBep1",
+            "12D3KooWP37FF5aY62MjcP5UJr1e3KJyu9cuARGFnFnTEkVdz6eh",
+            "12D3KooWNjR7M1659fBQXPpEs9tj959tgpD5T118vLojZKci9d4x",
+            "12D3KooWLcqHxG25dqsQqZAPz2zofcLrDga83pzsKAxy1G7GVbzg",
+            "12D3KooWDrAvsiX8hM5yVpDMrPEwSFRfQguLdBCVKgsYbVnqk2P4",
         ]
     });
-    let mut peers: Vec<String> = config["addr_book"]
+    let peers: Vec<String> = config["addr_book"]
         .as_array()
         .unwrap()
         .iter()
         .map(|o| String::from(o.as_str().unwrap()))
         .collect();
-    peers.sort();
 
     let mut output: Pok3rAddrBook = HashMap::new();
     let mut counter = 0;
-    for peer in peers {
+    for peer in &peers[0..num_parties as usize] {
         let pok3rpeer = Pok3rPeer {
             peer_id: peer.to_owned(),
             node_id: counter,
         };
 
-        output.insert(peer, pok3rpeer);
+        output.insert(peer.to_owned(), pok3rpeer);
         counter += 1;
     }
+
     output
 }
 
@@ -148,7 +179,7 @@ async fn main() {
         let result = task::block_on(
             network::run_networking_daemon(
                 args.seed, 
-                &parse_addr_book_from_json(), 
+                &parse_addr_book_from_json(args.parties), 
                 &mut n2e_tx,
                 e2n_rx)
         );
@@ -157,7 +188,7 @@ async fn main() {
         }
     });
     
-    let addr_book = parse_addr_book_from_json();
+    let addr_book = parse_addr_book_from_json(args.parties);
     let mut mpc = Evaluator::new(&args.id, addr_book, e2n_tx, n2e_rx).await;
 
     //this is a hack until we figure out
