@@ -1125,16 +1125,17 @@ async fn local_verify_encryption_proof(
     let s = utils::fs_hash(vec![&proof.to_bytes()], PERM_SIZE);
 
     // Compute e_batch
-    let mut e_batch = Gt::zero();
+    let mut accumulator = G1::zero();
 
     for i in 0..PERM_SIZE {
+        //TODO: do a real hash to curve
         let x_f = F::from(proof.ids[i].clone());
         let hash_id = G1::generator().mul(x_f);
 
-        let h = <Curve as Pairing>::pairing(hash_id, &proof.pk);
-
-        e_batch = e_batch.add(h.mul(s[i]));
+        accumulator = accumulator.add(hash_id.mul(s[i])).into_affine();
     }
+    
+    let e_batch = <Curve as Pairing>::pairing(accumulator, &proof.pk);
 
     // Compute d_batch
     let mut d_batch = G1::zero();
