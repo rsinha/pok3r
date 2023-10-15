@@ -5,14 +5,14 @@ mkdir -p /tmp/pok3r
 cargo b -r
 
 # CHANGE THIS
-n=5
+n=4
 
 # UNCOMMENT THIS
 target/release/pok3r --parties $n --seed 1 --id 12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X >> /tmp/pok3r/1 &
 target/release/pok3r --parties $n --seed 2 --id 12D3KooWH3uVF6wv47WnArKHk5p6cvgCJEb74UTmxztmQDc298L3 >> /tmp/pok3r/2 &
 target/release/pok3r --parties $n --seed 3 --id 12D3KooWQYhTNQdmr3ArTeUHRYzFg94BKyTkoWBDWez9kSCVe2Xo >> /tmp/pok3r/3 &
 target/release/pok3r --parties $n --seed 4 --id 12D3KooWLJtG8fd2hkQzTn96MrLvThmnNQjTUFZwGEsLRz5EmSzc >> /tmp/pok3r/4 &
-target/release/pok3r --parties $n --seed 5 --id 12D3KooWSHj3RRbBjD15g6wekV8y3mm57Pobmps2g2WJm6F67Lay >> /tmp/pok3r/5 &
+#target/release/pok3r --parties $n --seed 5 --id 12D3KooWSHj3RRbBjD15g6wekV8y3mm57Pobmps2g2WJm6F67Lay >> /tmp/pok3r/5 &
 #target/release/pok3r --parties $n --seed 6 --id 12D3KooWDMCQbZZvLgHiHntG1KwcHoqHPAxL37KvhgibWqFtpqUY >> /tmp/pok3r/6 &
 #target/release/pok3r --parties $n --seed 7 --id 12D3KooWLnZUpcaBwbz9uD1XsyyHnbXUrJRmxnsMiRnuCmvPix67 >> /tmp/pok3r/7 &
 #target/release/pok3r --parties $n --seed 8 --id 12D3KooWQ8vrERR8bnPByEjjtqV6hTWehaf8TmK7qR1cUsyrPpfZ >> /tmp/pok3r/8 &

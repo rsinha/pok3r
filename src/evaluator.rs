@@ -364,29 +364,38 @@ impl Evaluator {
             y_plus_b_handles.push(handle_y_plus_b);
         }
 
-        let x_plus_a_reconstructed = self
-            .batch_output_wire(&x_plus_a_handles)
-            .await;
+        // let x_plus_a_reconstructed = self
+        //     .batch_output_wire(&x_plus_a_handles)
+        //     .await;
 
-        let y_plus_b_reconstructed = self
-            .batch_output_wire(&y_plus_b_handles)
-            .await;
+        // let y_plus_b_reconstructed = self
+        //     .batch_output_wire(&y_plus_b_handles)
+        //     .await;
+
+        let mut batch_handles = vec![];
+        batch_handles.extend_from_slice(&x_plus_a_handles);
+        batch_handles.extend_from_slice(&y_plus_b_handles);
+
+        let x_plus_a_and_y_plus_b = self.batch_output_wire(&batch_handles).await;
 
         let mut output: Vec<String> = vec![];
         let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
         for i in 0..len {
+            let x_plus_a_reconstructed = x_plus_a_and_y_plus_b[i];
+            let y_plus_b_reconstructed = x_plus_a_and_y_plus_b[x_plus_a_handles.len() + i];
+
             //only one party should add the constant term
             let share_x_mul_y: F = match my_id {
                 0 => {
-                    x_plus_a_reconstructed[i] * y_plus_b_reconstructed[i] 
-                    - x_plus_a_reconstructed[i] * bookkeeping_b[i] 
-                    - y_plus_b_reconstructed[i] * bookkeeping_a[i]  
+                    x_plus_a_reconstructed * y_plus_b_reconstructed 
+                    - x_plus_a_reconstructed * bookkeeping_b[i] 
+                    - y_plus_b_reconstructed * bookkeeping_a[i]  
                     + bookkeeping_c[i]
                 },
                 _ => {
                     F::from(0)
-                    - x_plus_a_reconstructed[i] * bookkeeping_b[i] 
-                    - y_plus_b_reconstructed[i] * bookkeeping_a[i] 
+                    - x_plus_a_reconstructed * bookkeeping_b[i] 
+                    - y_plus_b_reconstructed* bookkeeping_a[i] 
                     + bookkeeping_c[i]
                 }
             };
@@ -541,10 +550,13 @@ impl Evaluator {
             values.push(encode_f_as_bs58_str(&self.get_wire(&wire_handles[i])));
         }
 
-        if len > 256 && len % 256 == 0 {
-            for i in 0..len / 256 {
-                let handles_bucket = &handles[256*i..256*(i+1)].to_vec();
-                let values_bucket = &values[256*i..256*(i+1)].to_vec();
+        if len > 256 {
+            let mut processed_len = 0;
+
+            while processed_len < len {
+                let this_iter_len = std::cmp::min(len - processed_len, 256);
+                let handles_bucket = &handles[processed_len..processed_len + this_iter_len].to_vec();
+                let values_bucket = &values[processed_len..processed_len + this_iter_len].to_vec();
 
                 let msg = EvalNetMsg::PublishBatchValue {
                     sender: self.id.clone(),
@@ -552,6 +564,8 @@ impl Evaluator {
                     values: values_bucket.to_owned(),
                 };
                 send_over_network!(msg, self.tx);
+
+                processed_len += this_iter_len;
             }
         } else {
             let msg = EvalNetMsg::PublishBatchValue {
