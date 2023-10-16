@@ -299,6 +299,7 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     //stores set of card prfs encountered
     let mut prfs = HashSet::new();
 
+    let t_52_64 = Instant::now();
     // Compute prfs for cards 52 to 63 and add to prfs first
     // So that the positions of these cards are fixed in the permutation
 
@@ -309,30 +310,40 @@ async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
         .collect::<Vec<F>>();
 
     // y_i = g^{1 / (sk + w_i)}
-    let denoms = (0..PERM_SIZE)
+    let denoms = (DECK_SIZE..PERM_SIZE)
         .into_iter()
         .map(|i| evaluator.clear_add(&sk, powers_of_ω[i]))
         .collect::<Vec<String>>();
 
     let t_is = evaluator.batch_inv(&denoms).await;
+
     let y_is = evaluator.batch_output_wire_in_exponent(&t_is).await;
 
-    for i in DECK_SIZE..PERM_SIZE {
+    for i in 0..(PERM_SIZE - DECK_SIZE) {
         prfs.insert(y_is[i].clone());
-        let handle = evaluator.fixed_wire_handle(powers_of_ω[i]).await;
+        let handle = evaluator.fixed_wire_handle(powers_of_ω[i + DECK_SIZE]);
         card_share_handles.push(handle.clone());
         card_share_values.push(evaluator.get_wire(&handle));
     }
-    
 
+    println!("PRFs for 52-64: {:?}", t_52_64.elapsed());
+    
+    let t_ran64 = Instant::now();
     let c_is = evaluator.batch_ran_64(NUM_SAMPLES).await;
+    println!("RAN64: {:?}", t_ran64.elapsed());
+
     let t_is = (0..NUM_SAMPLES)
         .into_iter()
         .map(|i| evaluator.add(&c_is[i], &sk))
         .collect::<Vec<String>>();    
 
+    let t_inv = Instant::now();
     let t_is = evaluator.batch_inv(&t_is).await;
+    println!("INV: {:?}", t_inv.elapsed());
+
+    let t_prfs = Instant::now();
     let y_is = evaluator.batch_output_wire_in_exponent(&t_is).await;
+    println!("PRFs: {:?}", t_prfs.elapsed());
 
     for i in 0..NUM_SAMPLES {
         //add card if it hasnt been seen before
@@ -904,6 +915,7 @@ async fn encrypt_and_prove(
         .map(|_i| evaluator.ran())
         .collect::<Vec<String>>();
 
+    let t_ibe = Instant::now();
     // Encrypt the masks to ids
     let (c1s, c2s) = evaluator.batch_dist_ibe_encrypt(
         &z_is, 
@@ -911,13 +923,16 @@ async fn encrypt_and_prove(
         &pk, 
         ids.as_slice()
     ).await;
+    println!("Time taken for IBE encryption : {:?}", t_ibe.elapsed());
 
+    let t_d = Instant::now();
     // Compute d_i = C^z_i
     let d_is = evaluator.batch_exp_and_reveal_g1(
         vec![vec![card_commitment]; PERM_SIZE], 
         z_is.clone().into_iter().map(|x| vec![x]).collect(), 
         (0..PERM_SIZE).into_iter().map(|i| format!("{}/{}", "enc_prove_D_", i)).collect()
     ).await;
+    println!("Time taken for D_i computation : {:?}", t_d.elapsed());
 
     // Compute v_i = z_i * card_i
     let v_is = evaluator.batch_mult(
@@ -943,16 +958,19 @@ async fn encrypt_and_prove(
         .flatten()
         .collect::<Vec<String>>();
 
+    let t_d_eval = Instant::now();
     let d_eval_handles = evaluator.batch_mult(
         &card_handles_64, 
         &z_is_64
     ).await;
+    println!("Time taken for D_i evaluation : {:?}", t_d_eval.elapsed());
 
     let mut d_evals = vec![];
     for i in 0..d_eval_handles.len() {
         d_evals.push(evaluator.get_wire(&d_eval_handles[i]));
     }
 
+    let t_pi = Instant::now();
     let d_evals = (0..PERM_SIZE)
         .into_iter()
         .map(|i| utils::interpolate_poly_over_mult_subgroup(&d_evals[i*PERM_SIZE..(i+1)*PERM_SIZE].to_vec()))
@@ -965,6 +983,7 @@ async fn encrypt_and_prove(
         &(0..PERM_SIZE).into_iter().map(|i| utils::compute_power(&w, i as u64)).collect(), 
         &(0..PERM_SIZE).into_iter().map(|i| format!("{}/{}", "enc_prove_pi_", i)).collect()
     ).await;
+    println!("Time taken for pi_i computation : {:?}", t_pi.elapsed());
 
 
     // for i in 0..64 {
@@ -1057,6 +1076,7 @@ async fn encrypt_and_prove(
 
     let s = utils::fs_hash(vec![&tmp_proof.to_bytes()], PERM_SIZE);
 
+    let t_pairing = Instant::now();
     // Compute batched pairing base for sigma proof
     let mut batch_h = G1::zero();
     for i in 0..PERM_SIZE {
@@ -1066,6 +1086,7 @@ async fn encrypt_and_prove(
         batch_h = batch_h.add(hash_id.mul(s[i])).into_affine();
     }
     let e_batch = <Curve as Pairing>::pairing(batch_h, pk);
+    println!("Time taken for pairing computation : {:?}", t_pairing.elapsed());
 
     let mut wit_1 = vec![];
     
@@ -1073,6 +1094,7 @@ async fn encrypt_and_prove(
         wit_1.push(z_is[i].clone());
     }
 
+    let t_sigma = Instant::now();
     let proof = dist_sigma_proof(
             evaluator,
             &card_commitment,
@@ -1082,6 +1104,7 @@ async fn encrypt_and_prove(
             r,
             s.clone()
         ).await;
+    println!("Time taken for sigma proof computation : {:?}", t_sigma.elapsed());
 
     EncryptProof {
         pk: pk.clone(),

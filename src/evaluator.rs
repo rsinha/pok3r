@@ -409,7 +409,7 @@ impl Evaluator {
         output
     }
 
-    pub async fn fixed_wire_handle(&mut self, value: F) -> String {
+    pub fn fixed_wire_handle(&mut self, value: F) -> String {
         let handle = self.compute_fresh_wire_label();
         
         let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
@@ -785,8 +785,14 @@ impl Evaluator {
             let mut sum = Gt::zero();
 
             for (base, exponent_handle) in msm_input {
-                let exponentiated = base.mul(self.get_wire(exponent_handle));
-                sum = sum.add(exponentiated);
+                let exponent = self.get_wire(exponent_handle);
+
+                if exponent == F::from(1) {
+                    sum = sum.add(base);
+                }
+                else {
+                    sum = sum.add(base.mul(self.get_wire(exponent_handle)));
+                }
             }
 
             group_elements.push(sum);
@@ -998,13 +1004,15 @@ impl Evaluator {
     ) -> (Vec<G1>, Vec<Gt>) {
         assert_eq!(msg_share_handles.len(), mask_share_handles.len());
 
+        // Compute e_i^r
         let e_is = ids
             .iter()
-            .map(|id| {
+            .zip(mask_share_handles.iter())
+            .map(|(id, mask)| {
                 let x_f = F::from(id.clone());
-                let hash_id = G1::generator().mul(x_f);
+                let hash_id_pow_r = G1::generator().mul(x_f).mul(self.get_wire(&mask));
 
-                <Curve as Pairing>::pairing(hash_id, pk)
+                <Curve as Pairing>::pairing(hash_id_pow_r, pk)
             })
             .collect::<Vec<Gt>>();
 
@@ -1017,17 +1025,20 @@ impl Evaluator {
                 .collect::<Vec<String>>()
         ).await;
 
-        // Vector of 64 elements, where the i^th element is a vector [g, e_i]
+        // Vector of 64 elements, where the i^th element is a vector [g, e_i^r]
         let gt_with_e_is = (0..msg_share_handles.len())
             .into_iter()
             .map(|i| vec![Gt::generator(), e_is[i].clone()])
             .collect::<Vec<Vec<Gt>>>();
 
-        // Vector of 64 elements, where the i^th element is a vector [msg_i, mask_i]
+        // Vector of 64 elements, where the i^th element is a vector [msg_i, 1]
+        let one_wire_handle = self.compute_fresh_wire_label();
+        self.wire_shares.insert(one_wire_handle.clone(), F::one());
+
         let msg_mask_interleaved = msg_share_handles
             .iter()
             .zip(mask_share_handles.iter())
-            .map(|(m, r)| vec![m.clone(), r.clone()])
+            .map(|(m, _)| vec![m.clone(), one_wire_handle.clone()])
             .collect::<Vec<Vec<String>>>();
 
         let c2s = self.batch_exp_and_reveal_gt(
