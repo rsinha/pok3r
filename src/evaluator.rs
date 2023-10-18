@@ -684,6 +684,68 @@ impl Evaluator {
         outputs
     }
 
+    pub async fn add_g2_elements_from_all_parties(
+        &mut self, value: &G2, 
+        identifier: &String
+    ) -> G2 {
+
+        let msg = EvalNetMsg::PublishValue {
+            sender: self.id.clone(),
+            handle: identifier.clone(),
+            value: encode_g2_as_bs58_str(value),
+        };
+        send_over_network!(msg, self.tx);
+
+        let incoming_msgs = self.collect_messages_from_all_peers(identifier).await;
+
+        let incoming_values: Vec<G2> = incoming_msgs
+            .into_iter()
+            .map(|x| decode_bs58_str_as_g2(&x))
+            .collect();
+
+        let mut sum: G2 = value.clone();
+        for v in incoming_values { sum = sum.add(v).into_affine(); }
+        sum
+    }
+
+    pub async fn batch_add_g2_elements_from_all_parties(
+        &mut self,
+        inputs: &[G2],
+        identifiers: &[String]
+    ) -> Vec<G2> {
+        assert_eq!(inputs.len(), identifiers.len());
+
+        let mut outputs = Vec::new();
+
+        let values = inputs
+            .into_iter()
+            .map(|e| encode_g2_as_bs58_str(e))
+            .collect();
+
+        let msg = EvalNetMsg::PublishBatchValue {
+            sender: self.id.clone(),
+            handles: identifiers.into(),
+            values: values,
+        };
+        send_over_network!(msg, self.tx);
+
+        for i in 0..inputs.len() {
+            let incoming_msgs = self.collect_messages_from_all_peers(&identifiers[i]).await;
+            let incoming_values: Vec<G2> = incoming_msgs
+                .into_iter()
+                .map(|x| decode_bs58_str_as_g2(&x))
+                .collect();
+
+            let sum = incoming_values
+                .iter()
+                .fold(inputs[i], |acc, v| acc.add(v).into_affine());
+
+            outputs.push(sum);
+        }
+
+        outputs
+    }
+
     // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
     pub async fn add_gt_elements_from_all_parties(
         &mut self, value: &Gt, 
@@ -849,6 +911,53 @@ impl Evaluator {
         self.batch_add_g1_elements_from_all_parties(&group_elements, &identifiers).await
     }
 
+    pub async fn exp_and_reveal_g2(
+        &mut self, 
+        bases: Vec<G2>, 
+        exponent_handles: Vec<String>, 
+        identifier: &String
+    ) -> G2 {
+        let mut sum = G2::zero();
+        
+        // Compute \sum_i g_i^[x_i]
+        for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
+            let my_share = self.get_wire(exponent_handle);
+            let exponentiated = base.clone().mul(my_share).into_affine();
+
+            sum = sum.add(exponentiated).into_affine();
+        }
+
+        self.add_g2_elements_from_all_parties(&sum, identifier).await
+    }
+
+    pub async fn batch_exp_and_reveal_g2(
+        &mut self, 
+        bases: Vec<Vec<G2>>,
+        exponent_handles: Vec<Vec<String>>,
+        identifiers: Vec<String>
+    ) -> Vec<G2> {
+        let len = bases.len();
+
+        assert_eq!(len, exponent_handles.len());
+        assert_eq!(len, identifiers.len());
+
+        let mut group_elements = vec![];
+
+        for i in 0..len {
+            let msm_input = bases[i].iter().zip(exponent_handles[i].iter());
+            let mut sum = G2::zero();
+
+            for (base, exponent_handle) in msm_input {
+                let exponentiated = base.mul(self.get_wire(exponent_handle)).into_affine();
+                sum = sum.add(exponentiated).into_affine();
+            }
+
+            group_elements.push(sum);
+        }
+
+        self.batch_add_g2_elements_from_all_parties(&group_elements, &identifiers).await
+    }
+
     /// returns a^64
     pub async fn exp(&mut self, input_label: &String) -> String {
         let mut tmp = input_label.clone();
@@ -1001,7 +1110,7 @@ impl Evaluator {
         mask_share_handles: &[String], // [r]
         pk: &G2, 
         ids: &[BigUint]
-    ) -> (Vec<G1>, Vec<Gt>) {
+    ) -> (Vec<G2>, Vec<Gt>) {
         assert_eq!(msg_share_handles.len(), mask_share_handles.len());
 
         // Compute e_i^r
@@ -1016,8 +1125,8 @@ impl Evaluator {
             })
             .collect::<Vec<Gt>>();
 
-        let c1s = self.batch_exp_and_reveal_g1(
-            vec![vec![<Curve as Pairing>::G1Affine::generator()]; msg_share_handles.len()], 
+        let c1s = self.batch_exp_and_reveal_g2(
+            vec![vec![<Curve as Pairing>::G2Affine::generator()]; msg_share_handles.len()], 
             vec![mask_share_handles.to_vec(); PERM_SIZE], 
             msg_share_handles
                 .iter()
@@ -1206,6 +1315,17 @@ fn encode_g1_as_bs58_str(value: &G1) -> String {
 fn decode_bs58_str_as_g1(msg: &String) -> G1 {
     let decoded = bs58::decode(msg).into_vec().unwrap();
     G1::deserialize_compressed(&mut Cursor::new(decoded)).unwrap()
+}
+
+fn encode_g2_as_bs58_str(value: &G2) -> String {
+    let mut serialized_msg: Vec<u8> = Vec::new();
+    value.serialize_compressed(&mut serialized_msg).unwrap();
+    bs58::encode(serialized_msg).into_string()
+}
+
+fn decode_bs58_str_as_g2(msg: &String) -> G2 {
+    let decoded = bs58::decode(msg).into_vec().unwrap();
+    G2::deserialize_compressed(&mut Cursor::new(decoded)).unwrap()
 }
 
 fn encode_gt_as_bs58_str(value: &Gt) -> String {

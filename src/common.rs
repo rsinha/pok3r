@@ -63,7 +63,7 @@ pub struct EncryptProof {
     pub masked_commitments: Vec<G1>,
     pub masked_evals: Vec<F>,
     pub eval_proofs: Vec<G1>,
-    pub ciphertexts: Vec<(G1,Gt)>,
+    pub ciphertexts: Vec<(G2,Gt)>,
     pub sigma_proof: Option<SigmaProof>,
 }
 
@@ -118,7 +118,7 @@ impl EncryptProof {
 /// SigmaProof is a structure for the sigma protocol proof
 pub struct SigmaProof {
     pub a1: G1,
-    pub a2: G1,
+    pub a2: G2,
     pub a3: Gt,
     pub x: F,
     pub y: F,
