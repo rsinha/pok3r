@@ -652,20 +652,41 @@ impl Evaluator {
         identifiers: &[String]
     ) -> Vec<G1> {
         assert_eq!(inputs.len(), identifiers.len());
+        let len = inputs.len();
 
         let mut outputs = Vec::new();
 
         let values = inputs
             .into_iter()
             .map(|e| encode_g1_as_bs58_str(e))
-            .collect();
+            .collect::<Vec<String>>();
 
-        let msg = EvalNetMsg::PublishBatchValue {
-            sender: self.id.clone(),
-            handles: identifiers.into(),
-            values: values,
-        };
-        send_over_network!(msg, self.tx);
+        if len > 256 {
+            let mut processed_len = 0;
+
+            while processed_len < len {
+                let this_iter_len = std::cmp::min(len - processed_len, 256);
+                let handles_bucket = &identifiers[processed_len..processed_len + this_iter_len].to_vec();
+                let values_bucket = &values[processed_len..processed_len + this_iter_len].to_vec();
+
+                let msg = EvalNetMsg::PublishBatchValue {
+                    sender: self.id.clone(),
+                    handles: handles_bucket.to_owned(),
+                    values: values_bucket.to_owned(),
+                };
+                send_over_network!(msg, self.tx);
+
+                processed_len += this_iter_len;
+            }
+        }
+        else {
+            let msg = EvalNetMsg::PublishBatchValue {
+                sender: self.id.clone(),
+                handles: identifiers.into(),
+                values: values,
+            };
+            send_over_network!(msg, self.tx);
+        }
 
         for i in 0..inputs.len() {
             let incoming_msgs = self.collect_messages_from_all_peers(&identifiers[i]).await;
@@ -715,19 +736,41 @@ impl Evaluator {
     ) -> Vec<G2> {
         assert_eq!(inputs.len(), identifiers.len());
 
+        let len = inputs.len();
+
         let mut outputs = Vec::new();
 
         let values = inputs
             .into_iter()
             .map(|e| encode_g2_as_bs58_str(e))
-            .collect();
+            .collect::<Vec<String>>();
 
-        let msg = EvalNetMsg::PublishBatchValue {
-            sender: self.id.clone(),
-            handles: identifiers.into(),
-            values: values,
-        };
-        send_over_network!(msg, self.tx);
+        if len > 256 {
+            let mut processed_len = 0;
+
+            while processed_len < len {
+                let this_iter_len = std::cmp::min(len - processed_len, 256);
+                let handles_bucket = &identifiers[processed_len..processed_len + this_iter_len].to_vec();
+                let values_bucket = &values[processed_len..processed_len + this_iter_len].to_vec();
+
+                let msg = EvalNetMsg::PublishBatchValue {
+                    sender: self.id.clone(),
+                    handles: handles_bucket.to_owned(),
+                    values: values_bucket.to_owned(),
+                };
+                send_over_network!(msg, self.tx);
+
+                processed_len += this_iter_len;
+            }
+        }
+        else {
+            let msg = EvalNetMsg::PublishBatchValue {
+                sender: self.id.clone(),
+                handles: identifiers.into(),
+                values: values,
+            };
+            send_over_network!(msg, self.tx);
+        }
 
         for i in 0..inputs.len() {
             let incoming_msgs = self.collect_messages_from_all_peers(&identifiers[i]).await;
@@ -778,19 +821,41 @@ impl Evaluator {
     ) -> Vec<Gt> {
         assert_eq!(inputs.len(), identifiers.len());
 
+        let len = inputs.len();
+
         let mut outputs = Vec::new();
 
         let values = inputs
             .into_iter()
             .map(|e| encode_gt_as_bs58_str(e))
-            .collect();
+            .collect::<Vec<String>>();
 
-        let msg = EvalNetMsg::PublishBatchValue {
-            sender: self.id.clone(),
-            handles: identifiers.into(),
-            values: values,
-        };
-        send_over_network!(msg, self.tx);
+        if len > 64 {
+            let mut processed_len = 0;
+
+            while processed_len < len {
+                let this_iter_len = std::cmp::min(len - processed_len, 64);
+                let handles_bucket = &identifiers[processed_len..processed_len + this_iter_len].to_vec();
+                let values_bucket = &values[processed_len..processed_len + this_iter_len].to_vec();
+
+                let msg = EvalNetMsg::PublishBatchValue {
+                    sender: self.id.clone(),
+                    handles: handles_bucket.to_owned(),
+                    values: values_bucket.to_owned(),
+                };
+                send_over_network!(msg, self.tx);
+
+                processed_len += this_iter_len;
+            }
+        }
+        else {
+            let msg = EvalNetMsg::PublishBatchValue {
+                sender: self.id.clone(),
+                handles: identifiers.into(),
+                values: values,
+            };
+            send_over_network!(msg, self.tx);
+        }
 
         for i in 0..inputs.len() {
             let incoming_msgs = self.collect_messages_from_all_peers(&identifiers[i]).await;
