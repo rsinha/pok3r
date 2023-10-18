@@ -210,6 +210,7 @@ async fn main() {
     let pp = utils::setup_kzg(1024);
 
     // Actual protocol
+    let s_total = Instant::now();
     let s_shuffle = Instant::now();
     let (card_share_handles, card_shares) = shuffle_deck(&mut mpc).await;
     let t_shuffle = s_shuffle.elapsed();
@@ -248,6 +249,8 @@ async fn main() {
         pk, 
         ids.clone()
     ).await;
+    println!("total_MPC_time: {:?}", s_total.elapsed());
+
     // let t_encrypt = s_encrypt.elapsed();
 
     // println!("encrypt_and_prove: {:?}", t_encrypt);
