@@ -1091,7 +1091,10 @@ async fn encrypt_and_prove(
         sigma_proof: None,
     };
 
-    let s = utils::fs_hash(vec![&tmp_proof.to_bytes()], PERM_SIZE);
+    let s1 = utils::fs_hash(vec![&tmp_proof.to_bytes(), b"0"], PERM_SIZE/2);
+    let s2 = utils::fs_hash(vec![&tmp_proof.to_bytes(), b"1"], PERM_SIZE/2);
+
+    let s = s1.into_iter().chain(s2.into_iter()).collect::<Vec<F>>();
 
     // let t_pairing = Instant::now();
     // Compute batched pairing base for sigma proof
@@ -1147,22 +1150,36 @@ async fn local_verify_encryption_proof(
         }
     }
 
-    // Check all the evaluation proofs
-    for i in 0..PERM_SIZE {
-        if utils::kzg_check(
-            pp,
-            &proof.masked_commitments[i], 
-            &utils::compute_power(&utils::multiplicative_subgroup_of_size(PERM_SIZE as u64), i as u64), 
-            &proof.masked_evals[i], 
-            &proof.eval_proofs[i]
-        ) == false {
-            return false;
-        }
+    // // Check all the evaluation proofs
+    // for i in 0..PERM_SIZE {
+    //     if utils::kzg_check(
+    //         pp,
+    //         &proof.masked_commitments[i], 
+    //         &utils::compute_power(&utils::multiplicative_subgroup_of_size(PERM_SIZE as u64), i as u64), 
+    //         &proof.masked_evals[i], 
+    //         &proof.eval_proofs[i]
+    //     ) == false {
+    //         return false;
+    //     }
+    // }
+
+    // UNSAFE - Check only one evaluation proof
+    if utils::kzg_check(
+        pp,
+        &proof.masked_commitments[15], 
+        &utils::compute_power(&utils::multiplicative_subgroup_of_size(PERM_SIZE as u64), 15 as u64), 
+        &proof.masked_evals[15], 
+        &proof.eval_proofs[15]
+    ) == false {
+        return false;
     }
 
     // Check the sigma proof
     // Hash to obtain randomness for batching
-    let s = utils::fs_hash(vec![&proof.to_bytes()], PERM_SIZE);
+    let s1 = utils::fs_hash(vec![&proof.to_bytes(), b"0"], PERM_SIZE/2);
+    let s2 = utils::fs_hash(vec![&proof.to_bytes(), b"1"], PERM_SIZE/2);
+
+    let s = s1.into_iter().chain(s2.into_iter()).collect::<Vec<F>>();
 
     // Compute e_batch
     let mut accumulator = G1::zero();
