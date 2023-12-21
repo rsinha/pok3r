@@ -48,6 +48,21 @@ pub fn multiplicative_subgroup_of_size(n: u64) -> F {
     domain.group_gen
 }
 
+/// returns t(X) = X^n - 1
+pub fn compute_vanishing_poly(n: usize) -> DensePolynomial<F> {
+    let mut coeffs = vec![];
+    for i in 0..n+1 {
+        if i == 0 {
+            coeffs.push(F::from(0) - F::from(1)); // -1
+        } else if i == n {
+            coeffs.push(F::from(1)); // X^n
+        } else {
+            coeffs.push(F::from(0));
+        }
+    }
+    DensePolynomial { coeffs }
+}
+
 /// interpolate polynomial which evaluates to points in v
 /// the domain is the powers of n-th root of unity, where n is size of v
 /// assumes n is a power of 2

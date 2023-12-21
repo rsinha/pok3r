@@ -193,6 +193,19 @@ impl Evaluator {
         self.wire_shares.insert(handle.clone(), share_x + share_y);
         handle
     }
+
+    /// outputs the wire label denoting the [x] - [y]
+    pub fn sub(&mut self, 
+        handle_x: &String, 
+        handle_y: &String) -> String {
+        let handle =  self.compute_fresh_wire_label();
+
+        let share_x = self.get_wire(handle_x);
+        let share_y = self.get_wire(handle_y);
+
+        self.wire_shares.insert(handle.clone(), share_x - share_y);
+        handle
+    }
     
     pub async fn inv(&mut self, 
         handle_in: &String
@@ -424,7 +437,7 @@ impl Evaluator {
 
     /// PolyEval takes as input a shared polynomial f(x) and a point x and returns share of f(x)
     pub fn share_poly_eval(&mut self, 
-        f_poly_share: DensePolynomial<F>,
+        f_poly_share: &DensePolynomial<F>,
         x: F,
      ) -> String {
 
@@ -457,8 +470,8 @@ impl Evaluator {
         let mut g_evals = Vec::new();
 
         for i in 0..2*PERM_SIZE {
-            f_evals.push(self.share_poly_eval(f_poly_share.clone(), powers_of_alpha[i]));
-            g_evals.push(self.share_poly_eval(g_poly_share.clone(), powers_of_alpha[i]));
+            f_evals.push(self.share_poly_eval(&f_poly_share, powers_of_alpha[i]));
+            g_evals.push(self.share_poly_eval(&g_poly_share, powers_of_alpha[i]));
         }
 
         // Compute h_evals from f_evals and g_evals using Beaver mult
@@ -1109,11 +1122,10 @@ impl Evaluator {
         &mut self, 
         pp: &UniversalParams<Curve>, 
         share_polys: &Vec<DensePolynomial<F>>, 
-        z_s: &Vec<F>, 
-        f_names: &Vec<String>
+        z_s: &Vec<F>
     ) -> Vec<G1> {
         let len = share_polys.len();
-        assert_eq!(len, f_names.len());
+        // assert_eq!(len, f_names.len());
 
         let mut pi_share_vec = Vec::new();
         for i in 0..len {
@@ -1135,7 +1147,8 @@ impl Evaluator {
             pi_share_vec.push(pi_poly);
         }
 
-        self.batch_add_g1_elements_from_all_parties(&pi_share_vec, &f_names).await
+        pi_share_vec
+        // self.batch_add_g1_elements_from_all_parties(&pi_share_vec, &f_names).await
     }
 
     pub async fn dist_ibe_encrypt(

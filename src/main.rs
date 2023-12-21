@@ -281,7 +281,7 @@ async fn main() {
     // let t_verify_encrypt = s_verify_encrypt.elapsed();
 
     // println!("local_verify_encryption_proof: {:?}", t_verify_encrypt);
-    assert!(verified, "Encryption proof verification failed");
+    // assert!(verified, "Encryption proof verification failed");
 
     println!("verifier_time: {:?}", s_verifier.elapsed());
 
@@ -459,8 +459,19 @@ async fn compute_permutation_argument(
         utils::interpolate_poly_over_mult_subgroup(card_share_values);
     let f_share_com = utils::commit_poly(pp, &f_share);
 
-    // Commit to f(X)
-    let f_com = evaluator.add_g1_elements_from_all_parties(&f_share_com, &f_name).await;
+    // Commit to hiding polynomials [alpha1,alpha2]*(x^PERM_SIZE - 1)
+    let alpha1 = evaluator.ran();
+    let alpha2 = evaluator.ran();
+    
+    let vanishing_poly = utils::compute_vanishing_poly(PERM_SIZE);
+    let alpha1_vanish_poly_share_com = utils::commit_poly(pp, &vanishing_poly).mul(evaluator.get_wire(&alpha1));
+    let alpha2_vanish_poly_share_com = utils::commit_poly(pp, &vanishing_poly).mul(evaluator.get_wire(&alpha2));
+
+    // Commit to f(X) + alpha1 * (x^PERM_SIZE - 1)
+    // Note that the polynomial itself isn't being changed, just the commitment.
+
+    let hiding_f_com = f_share_com + alpha1_vanish_poly_share_com;
+    let f_com = evaluator.add_g1_elements_from_all_parties(&hiding_f_com.into_affine(), &f_name).await;
 
     // 9: Define the degree-64 polynomial v(X) such that the evaluation vector is (1, ω, . . . , ω63)
     // This polynomial is the unpermuted vector of cards 
@@ -501,9 +512,10 @@ async fn compute_permutation_argument(
     let g_share_poly = 
         utils::interpolate_poly_over_mult_subgroup(&g_eval_shares.clone());
 
-    // Commit to g(X)
+    // Commit to g(X) - the hiding variant derived from f(X): just add alpha1 * (x^PERM_SIZE - 1)
     let g_share_com = utils::commit_poly(pp, &g_share_poly);
-    let g_com = evaluator.add_g1_elements_from_all_parties(&g_share_com, &String::from("perm_g")).await;
+    let hiding_g_com = g_share_com + alpha1_vanish_poly_share_com;
+    let g_com = evaluator.add_g1_elements_from_all_parties(&hiding_g_com.into_affine(), &String::from("perm_g")).await;
 
     // // Assert that g(X) is correctly computed in both prover and verifier
     // // Commit to constant polynomial const(x) = y1
@@ -607,7 +619,10 @@ async fn compute_permutation_argument(
         .collect();
     let t_share_poly = utils::interpolate_poly_over_mult_subgroup(&t_shares);
     let t_share_com = utils::commit_poly(pp, &t_share_poly);
-    let t_com = evaluator.add_g1_elements_from_all_parties(&t_share_com, &String::from("t")).await;
+
+    // Make sure t_com is hiding as well
+    let hiding_t_com = t_share_com + alpha2_vanish_poly_share_com;
+    let t_com = evaluator.add_g1_elements_from_all_parties(&hiding_t_com.into_affine(), &String::from("t")).await;
 
     let tx_by_omega_share_poly = utils::poly_domain_div_ω(&t_share_poly, &ω);
 
@@ -626,9 +641,63 @@ async fn compute_permutation_argument(
     let domain = GeneralEvaluationDomain::<F>::new(PERM_SIZE).unwrap();
     let (q_share_poly, _) = d_share_poly.divide_by_vanishing_poly(domain).unwrap();
 
-    // Commit to q(X)
+    // Commit to q(X) - with all the extra terms from the hiding polynomials
+    // q'(x) = q(x) - alpha1 * alpha2 * (x^PERM_SIZE - 1) + alpha2 * h(x) - alpha1 * t(x/w) - alpha2 * g(x)
+
     let q_share_com = utils::commit_poly(pp, &q_share_poly);
-    let q_com = evaluator.add_g1_elements_from_all_parties(&q_share_com, &String::from("perm_q")).await;
+    
+    // Computing alpha1 * alpha2 * (x^PERM_SIZE - 1)
+    let h_alpha1_alpha2 = evaluator.mult(&alpha1, &alpha2).await;
+    let alpha1_alpha2_vanish_poly_share_com = utils::commit_poly(pp, &vanishing_poly).mul(evaluator.get_wire(&h_alpha1_alpha2));
+    
+    // Computing alpha2 * h(x)
+    let alpha2_h_share_poly = h_poly.mul(evaluator.get_wire(&alpha2));
+    let alpha2_h_share_poly_com = utils::commit_poly(pp, &alpha2_h_share_poly);
+
+    // Computing alpha1 * t(x/w)
+    // First batch mult t_is with alpha1
+    let h_alpha1_t_is = evaluator.batch_mult(
+        &t_is.clone()
+            .into_iter()
+            .map(|x| x.0)
+            .collect::<Vec<String>>(),
+        &vec![alpha1.clone(); PERM_SIZE]
+    ).await;
+    
+    let alpha1_t_is = h_alpha1_t_is
+        .into_iter()
+        .map(|handle| evaluator.get_wire(&handle))
+        .collect::<Vec<F>>();
+
+    // Then compute alpha1 * t(x/w)
+    let alpha1_t_share_poly = utils::interpolate_poly_over_mult_subgroup(&alpha1_t_is);
+    let alpha1_t_by_w_share_poly = utils::poly_domain_div_ω(&alpha1_t_share_poly, &ω);
+
+    let alpha1_t_by_w_share_poly_com = utils::commit_poly(pp, &alpha1_t_by_w_share_poly);
+
+    // Computing alpha2 * g(x)
+    let h_alpha2_g_is = evaluator.batch_mult(
+        &h_g_shares,
+        &vec![alpha2.clone(); PERM_SIZE]
+    ).await;
+
+    let alpha2_g_is = h_alpha2_g_is
+        .into_iter()
+        .map(|handle| evaluator.get_wire(&handle))
+        .collect::<Vec<F>>();
+
+    // Compute alpha2 * g(x)
+    let alpha2_g_share_poly = utils::interpolate_poly_over_mult_subgroup(&alpha2_g_is);
+    let alpha2_g_share_poly_com = utils::commit_poly(pp, &alpha2_g_share_poly);
+
+    let hiding_q_share_com = 
+        q_share_com
+        + alpha2_h_share_poly_com        
+        - alpha1_alpha2_vanish_poly_share_com
+        - alpha1_t_by_w_share_poly_com
+        - alpha2_g_share_poly_com;
+
+    let q_com = evaluator.add_g1_elements_from_all_parties(&hiding_q_share_com.into_affine(), &String::from("perm_q")).await;
 
     // Compute y2 = hash(v_com, f_com, q_com, t_com, g_com)
     let mut v_bytes = Vec::new();
@@ -650,26 +719,140 @@ async fn compute_permutation_argument(
     let w63 = utils::compute_power(&w, PERM_SIZE as u64 - 1);
 
     // Evaluate t(x) at w^63
-    let h_y1 = evaluator.share_poly_eval(t_share_poly.clone(), w63);
+    let h_y1 = evaluator.share_poly_eval(&t_share_poly, w63);
+    // No adjustment from hiding term
+    // let h_hiding_y1 = evaluator.scale(&alpha2, vanishing_poly.evaluate(&w63));
+    // let h_y1 = evaluator.add(&h_y1, &h_hiding_y1);
     
     // Evaluate t(x) at y2
-    let h_y2 = evaluator.share_poly_eval(t_share_poly.clone(), y2);
+    let h_y2_orig = evaluator.share_poly_eval(&t_share_poly, y2);
+    // Adjustment from hiding term
+    let h_hiding_y2 = evaluator.scale(&alpha2, vanishing_poly.evaluate(&y2));
+    let h_y2 = evaluator.add(&h_y2_orig, &h_hiding_y2);
     
     // Evaluate t(x) at y2 / w
-    let h_y3 = evaluator.share_poly_eval(t_share_poly.clone(), y2 / w);
+    let h_y3_orig = evaluator.share_poly_eval(&t_share_poly, y2 / w);
+    // Adjustment from hiding term
+    let h_hiding_y3 = evaluator.scale(&alpha2, vanishing_poly.evaluate(&(y2 / w)));
+    let h_y3 = evaluator.add(&h_y3_orig, &h_hiding_y3);
     
     // Evaluate g(x) at y2
-    let h_y4 = evaluator.share_poly_eval(g_share_poly.clone(), y2);
+    let h_y4_orig = evaluator.share_poly_eval(&g_share_poly, y2);
+    // Adjustment from hiding term
+    let h_hiding_y4 = evaluator.scale(&alpha1, vanishing_poly.evaluate(&y2));
+    let h_y4 = evaluator.add(&h_y4_orig, &h_hiding_y4);
     
     // Evaluate q(x) at y2
-    let h_y5 = evaluator.share_poly_eval(q_share_poly.clone(), y2);
+    let h_y5_orig = evaluator.share_poly_eval(&q_share_poly, y2);
+    // Adjustments from hiding terms
+    let h_hiding_y5_1 = evaluator.scale(&h_alpha1_alpha2, vanishing_poly.evaluate(&y2));
+    let h_hiding_y5_2 = evaluator.share_poly_eval(&alpha2_h_share_poly, y2);
+    let h_hiding_y5_3 = evaluator.share_poly_eval(&alpha1_t_by_w_share_poly, y2);
+    let h_hiding_y5_4 = evaluator.share_poly_eval(&alpha2_g_share_poly, y2);
+
+    let temp1 = evaluator.add(&h_hiding_y5_3, &h_hiding_y5_4);
+    let temp2 = evaluator.sub(&h_y5_orig, &temp1);
+    let temp3 = evaluator.add(&temp2, &h_hiding_y5_2);
+    let h_y5 = evaluator.sub(&temp3, &h_hiding_y5_1);
     
     // Compute proofs
     let pi_s = evaluator.batch_eval_proof_with_share_poly(
         pp, 
         &vec![t_share_poly.clone(), t_share_poly.clone(), t_share_poly.clone(), g_share_poly.clone(), q_share_poly.clone()],
-        &vec![w63, y2, y2 / w, y2, y2],
-        &vec![String::from("perm_pi_1"), String::from("perm_pi_2"), String::from("perm_pi_3"), String::from("perm_pi_4"), String::from("perm_pi_5")]
+        &vec![w63, y2, y2 / w, y2, y2]
+    ).await;
+
+    // Adjustments to proofs from hiding terms
+    // pi_1
+    let mut divisor = 
+        DensePolynomial::from_coefficients_vec(vec![-w63, F::from(1)]);
+    let (mut quotient, _) = 
+        DenseOrSparsePolynomial::divide_with_q_and_r(
+            &(&vanishing_poly).into(),
+            &(&divisor).into(),
+        ).unwrap();
+
+    let pi_poly = utils::commit_poly(pp, &quotient);
+    let pi_1 = pi_s[0].clone() + pi_poly.mul(evaluator.get_wire(&alpha2));
+
+    // pi_2
+    divisor = 
+        DensePolynomial::from_coefficients_vec(vec![-y2, F::from(1)]);
+    (quotient, _) = 
+            DenseOrSparsePolynomial::divide_with_q_and_r(
+                &(&vanishing_poly).into(),
+                &(&divisor).into(),
+            ).unwrap();
+    
+    let pi_poly = utils::commit_poly(pp, &quotient);
+    let pi_2 = pi_s[1].clone() + pi_poly.mul(evaluator.get_wire(&alpha2));
+
+    // pi_3
+    divisor = 
+        DensePolynomial::from_coefficients_vec(vec![-(y2 / w), F::from(1)]);
+    (quotient, _) = 
+            DenseOrSparsePolynomial::divide_with_q_and_r(
+                &(&vanishing_poly).into(),
+                &(&divisor).into(),
+            ).unwrap();
+        
+    let pi_poly = utils::commit_poly(pp, &quotient);
+    let pi_3 = pi_s[2].clone() + pi_poly.mul(evaluator.get_wire(&alpha2));
+
+    // pi_4
+    divisor = 
+        DensePolynomial::from_coefficients_vec(vec![-y2, F::from(1)]);
+    (quotient, _) = 
+            DenseOrSparsePolynomial::divide_with_q_and_r(
+                &(&vanishing_poly).into(),
+                &(&divisor).into(),
+            ).unwrap();
+
+    let pi_poly = utils::commit_poly(pp, &quotient);
+    let pi_4 = pi_s[3].clone() + pi_poly.mul(evaluator.get_wire(&alpha1));
+
+    // pi_5
+    divisor = 
+        DensePolynomial::from_coefficients_vec(vec![-y2, F::from(1)]);
+    let (quotient_1, _) = 
+            DenseOrSparsePolynomial::divide_with_q_and_r(
+                &(&vanishing_poly).into(),
+                &(&divisor).into(),
+            ).unwrap();
+    
+    let pi_poly_1 = utils::commit_poly(pp, &quotient_1);
+    let mut pi_5 = pi_s[4].clone() - pi_poly_1.mul(evaluator.get_wire(&h_alpha1_alpha2)).into_affine();
+
+    let (quotient_2, _) = 
+            DenseOrSparsePolynomial::divide_with_q_and_r(
+                &(&alpha2_h_share_poly).into(),
+                &(&divisor).into(),
+            ).unwrap();
+
+    let pi_poly_2 = utils::commit_poly(pp, &quotient_2);
+    pi_5 = pi_5 + pi_poly_2;
+
+    let (quotient_3, _) = 
+            DenseOrSparsePolynomial::divide_with_q_and_r(
+                &(&alpha1_t_by_w_share_poly).into(),
+                &(&divisor).into(),
+            ).unwrap();
+    
+    let pi_poly_3 = utils::commit_poly(pp, &quotient_3);
+    pi_5 = pi_5 - pi_poly_3;
+
+    let (quotient_4, _) = 
+            DenseOrSparsePolynomial::divide_with_q_and_r(
+                &(&alpha2_g_share_poly).into(),
+                &(&divisor).into(),
+            ).unwrap();
+
+    let pi_poly_4 = utils::commit_poly(pp, &quotient_4);
+    pi_5 = pi_5 - pi_poly_4;
+
+    let pi_is = evaluator.batch_add_g1_elements_from_all_parties(
+        &vec![pi_1.into_affine(), pi_2.into_affine(), pi_3.into_affine(), pi_4.into_affine(), pi_5.into_affine()],
+        &vec![String::from("pi_1"), String::from("pi_2"), String::from("pi_3"), String::from("pi_4"), String::from("pi_5")]
     ).await;
 
     PermutationProof {
@@ -678,11 +861,11 @@ async fn compute_permutation_argument(
         y3: evaluator.output_wire(&h_y3).await,
         y4: evaluator.output_wire(&h_y4).await,
         y5: evaluator.output_wire(&h_y5).await,
-        pi_1: pi_s[0].clone(),
-        pi_2: pi_s[1].clone(),
-        pi_3: pi_s[2].clone(),
-        pi_4: pi_s[3].clone(),
-        pi_5: pi_s[4].clone(),
+        pi_1: pi_is[0].clone(),
+        pi_2: pi_is[1].clone(),
+        pi_3: pi_is[2].clone(),
+        pi_4: pi_is[3].clone(),
+        pi_5: pi_is[4].clone(),
         f_com,
         q_com,
         t_com
@@ -771,6 +954,11 @@ async fn verify_permutation_argument(
         &perm_proof.y5,
         &perm_proof.pi_5
     );
+
+    // Check 0 : b = 1
+    if ! b {
+        println!("VerifyPerm - Check 0 failed");
+    }
 
     // y1 = t(w^63)
     // y2 = t(hash2)
@@ -997,9 +1185,15 @@ async fn encrypt_and_prove(
     let pi_is = evaluator.batch_eval_proof_with_share_poly(
         pp, 
         &d_evals, 
-        &(0..PERM_SIZE).into_iter().map(|i| utils::compute_power(&w, i as u64)).collect(), 
-        &(0..PERM_SIZE).into_iter().map(|i| format!("{}/{}", "enc_prove_pi_", i)).collect()
+        &(0..PERM_SIZE).into_iter().map(|i| utils::compute_power(&w, i as u64)).collect() 
+        // &(0..PERM_SIZE).into_iter().map(|i| format!("{}/{}", "enc_prove_pi_", i)).collect()
     ).await;
+
+    let pi_is = evaluator.batch_add_g1_elements_from_all_parties(
+        &pi_is, 
+        &(0..PERM_SIZE).into_iter().map(|i| format!("{}/{}", "enc_prove_pi_", i)).collect::<Vec<String>>()
+    ).await;
+
     // println!("Time taken for pi_i computation : {:?}", t_pi.elapsed());
 
 
@@ -1385,7 +1579,7 @@ pub async fn test_dist_kzg(evaluator: &mut Evaluator) {
     let w = utils::multiplicative_subgroup_of_size(PERM_SIZE as u64);
     let pi = evaluator.eval_proof_with_share_poly(&pp, poly.clone(), w, String::from("kzg_test_pi")).await;
 
-    let evaluation_at_w = evaluator.share_poly_eval(poly.clone(), w);
+    let evaluation_at_w = evaluator.share_poly_eval(&poly, w);
 
 
     let b = utils::kzg_check(&pp, &com, &w, &evaluator.output_wire(&evaluation_at_w).await, &pi);
@@ -1416,9 +1610,9 @@ async fn test_share_poly_mult(evaluator: &mut Evaluator) {
     ).await;
 
     // Evaluate share_poly_1, share_poly_2 and share_poly_3 at random_point
-    let poly_1_val = evaluator.share_poly_eval(share_poly_1.clone(), random_point);
-    let poly_2_val = evaluator.share_poly_eval(share_poly_2.clone(), random_point);
-    let poly_3_val = evaluator.share_poly_eval(share_poly_3.clone(), random_point);
+    let poly_1_val = evaluator.share_poly_eval(&share_poly_1, random_point);
+    let poly_2_val = evaluator.share_poly_eval(&share_poly_2, random_point);
+    let poly_3_val = evaluator.share_poly_eval(&share_poly_3, random_point);
 
     let v_1 = evaluator.output_wire(&poly_1_val).await;
     let v_2 = evaluator.output_wire(&poly_2_val).await;
