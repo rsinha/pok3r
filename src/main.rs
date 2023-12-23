@@ -1273,6 +1273,8 @@ async fn local_verify_new_encryption_proof(
     pp: &UniversalParams<Curve>,
     proof: &NewEncryptProof,
 ) -> bool {
+    let mut b = true;
+
     // Check that all ciphertexts share the same randomness
     let c1 = proof.ciphertexts[0].0.clone();
     for i in 1..PERM_SIZE {
@@ -1298,23 +1300,25 @@ async fn local_verify_new_encryption_proof(
     proof.hiding_ciphertext.serialize_uncompressed(&mut c2_bytes).unwrap();
     bytes.extend_from_slice(&c2_bytes);
 
-    let delta = utils::fs_hash(vec![&bytes], 1);
+    let delta = utils::fs_hash(vec![&bytes], 1)[0];
 
     // Check evaluation proof
     if ! utils::kzg_check(
         pp,
         &proof.card_commitment,
-        &delta[0],
+        &delta,
         &proof.card_poly_eval,
         &proof.eval_proof
     ) {
-        return false;
+        b = false;
     }
+
+    if b == true { println!("Enc_and_prove: Eval proof verified"); }
 
     // Compute e_batch
     let mut lagrange_delta = Vec::new();
     for i in 0..PERM_SIZE {
-        lagrange_delta.push(utils::compute_lagrange_basis(i as u64, PERM_SIZE as u64).evaluate(&delta[0]));
+        lagrange_delta.push(utils::compute_lagrange_basis(i as u64, PERM_SIZE as u64).evaluate(&delta));
     }
 
     let mut batch_h = G1::zero();
@@ -1323,21 +1327,35 @@ async fn local_verify_new_encryption_proof(
         let x_f = F::from(proof.ids[i].clone());
         let hash_id = G1::generator().mul(x_f);
         batch_h = batch_h.add(hash_id.mul(lagrange_delta[i])).into_affine();
+
+        // Add the contribution from the hiding term (multiplied with (delta^PERM_SIZE - 1))
+        if i == PERM_SIZE {
+            let x_f = F::from(BigUint::from(123 as u64));
+            let hash_id = G1::generator().mul(x_f);
+            batch_h = batch_h.add(hash_id.mul(utils::compute_power(&delta, PERM_SIZE as u64) - F::from(1))).into_affine()
+        }
     }
     let e_batch = <Curve as Pairing>::pairing(batch_h, proof.pk);
 
-    // Check that prod_i c2_i^Li(delta) = g^f(delta) * t
+    // Check that prod_i c2_i^Li(delta) * alpha1_c2*(delta*PERM_SIZE - 1) = g^f(delta) * t
     let mut lhs = Gt::zero();
     for i in 0..PERM_SIZE {
         lhs = lhs + proof.ciphertexts[i].1.mul(lagrange_delta[i]);
+
+        // Add hiding_ciphertext
+        if i == PERM_SIZE {
+            lhs = lhs + proof.hiding_ciphertext.mul(utils::compute_power(&delta, PERM_SIZE as u64) - F::from(1));
+        }
     }
 
     let mut rhs = Gt::generator().mul(proof.card_poly_eval);
     rhs = rhs.add(proof.t);
 
     if ! lhs.eq(&rhs) {
-        return false;
+        b = false;
     }
+
+    if b == true { println!("Enc_and_prove: Aggregate check verified"); }
 
     // Check sigma proof
     // Compute hash to get eta
@@ -1354,7 +1372,7 @@ async fn local_verify_new_encryption_proof(
     let rhs = c1.mul(eta[0]).add(proof.sigma_proof.as_ref().unwrap().a1);
 
     if ! lhs.eq(&rhs) {
-        return false;
+        b = false;
     }
 
     // Check statement 2
@@ -1362,10 +1380,12 @@ async fn local_verify_new_encryption_proof(
     let rhs = proof.t.mul(eta[0]).add(proof.sigma_proof.as_ref().unwrap().a2);
 
     if ! lhs.eq(&rhs) {
-        return false;
+        b = false;
     }
 
-    true
+    if b == true { println!("Enc_and_prove: Sigma proof verified"); }
+
+    b
 }
 
 async fn _encrypt_and_prove(
