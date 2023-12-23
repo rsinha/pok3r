@@ -48,6 +48,19 @@ pub fn multiplicative_subgroup_of_size(n: u64) -> F {
     domain.group_gen
 }
 
+/// returns lagrange basis polynomial for index i
+pub fn compute_lagrange_basis(i: u64, n: u64) -> DensePolynomial<F> {
+    let mut evals = vec![];
+    for j in 0..n {
+        if i == j {
+            evals.push(F::from(1));
+        } else {
+            evals.push(F::from(0));
+        }
+    }
+    self::interpolate_poly_over_mult_subgroup(&evals)
+}
+
 /// returns t(X) = X^n - 1
 pub fn compute_vanishing_poly(n: usize) -> DensePolynomial<F> {
     let mut coeffs = vec![];

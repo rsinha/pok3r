@@ -1099,7 +1099,7 @@ impl Evaluator {
         pi
     }
 
-    pub async fn eval_proof_with_share_poly(&mut self, pp: &UniversalParams<Curve>, share_poly: DensePolynomial<F>, z: F, f_name: String) -> G1 {
+    pub async fn eval_proof_with_share_poly(&mut self, pp: &UniversalParams<Curve>, share_poly: DensePolynomial<F>, z: F) -> G1 {
         // Compute f_polynomial
         let f_poly = share_poly;
 
@@ -1113,9 +1113,9 @@ impl Evaluator {
             ).unwrap();
 
         let pi_poly = utils::commit_poly(pp, &quotient);
-        let pi = self.add_g1_elements_from_all_parties(&pi_poly, &f_name).await;
+        // let pi = self.add_g1_elements_from_all_parties(&pi_poly, &f_name).await;
 
-        pi
+        pi_poly
     }
 
     pub async fn batch_eval_proof_with_share_poly(

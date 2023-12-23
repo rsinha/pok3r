@@ -218,7 +218,7 @@ async fn main() {
     println!("shuffle_deck: {:?}", t_shuffle);
     
     let s_perm = Instant::now();
-    let perm_proof = compute_permutation_argument(
+    let (perm_proof, alpha1) = compute_permutation_argument(
         &pp, 
         &mut mpc, 
         card_share_handles.clone(), 
@@ -240,31 +240,32 @@ async fn main() {
         .collect::<Vec<BigUint>>();
 
     // Encrypt and prove
-    // let s_encrypt = Instant::now();
-    let encrypt_proof = encrypt_and_prove(
+    let s_encrypt = Instant::now();
+    let encrypt_proof = new_encrypt_and_prove(
         &pp, 
         &mut mpc, 
         card_share_handles.clone(), 
         perm_proof.f_com, 
+        alpha1,
         pk, 
         ids.clone()
     ).await;
     println!("total_MPC_time: {:?}", s_total.elapsed());
 
-    // let t_encrypt = s_encrypt.elapsed();
+    let t_encrypt = s_encrypt.elapsed();
 
-    // println!("encrypt_and_prove: {:?}", t_encrypt);
+    println!("encrypt_and_prove: {:?}", t_encrypt);
 
-    let x_f = F::from(ids[15].clone());
-    let hash_id_15 = G1::generator().mul(x_f);
-    let dec_key = (hash_id_15 * msk).into_affine();
+    // let x_f = F::from(ids[15].clone());
+    // let hash_id_15 = G1::generator().mul(x_f);
+    // let dec_key = (hash_id_15 * msk).into_affine();
 
-    let s_verifier = Instant::now();
-    let _card = decrypt_one_card(
-        15,
-        &dec_key,
-        &encrypt_proof
-    );
+    // let s_verifier = Instant::now();
+    // let _card = decrypt_one_card(
+    //     15,
+    //     &dec_key,
+    //     &encrypt_proof
+    // );
     
     // println!("decrypt_one_card: {:?}", s_decryption.elapsed());
     
@@ -277,13 +278,13 @@ async fn main() {
 
 
     // let s_verify_encrypt = Instant::now();
-    let verified = local_verify_encryption_proof(&pp, &encrypt_proof).await;
+    let verified = local_verify_new_encryption_proof(&pp, &encrypt_proof).await;
     // let t_verify_encrypt = s_verify_encrypt.elapsed();
 
     // println!("local_verify_encryption_proof: {:?}", t_verify_encrypt);
-    // assert!(verified, "Encryption proof verification failed");
+    assert!(verified, "Encryption proof verification failed");
 
-    println!("verifier_time: {:?}", s_verifier.elapsed());
+    // println!("verifier_time: {:?}", s_verifier.elapsed());
 
     //eval_handle.join().unwrap();
     netd_handle.join().unwrap();
@@ -416,8 +417,8 @@ async fn compute_permutation_argument(
     pp: &UniversalParams<Curve>,
     evaluator: &mut Evaluator,
     card_share_handles: Vec<String>,
-    card_share_values: &Vec<F>
-) -> PermutationProof {
+    card_share_values: &Vec<F>,
+) -> (PermutationProof, String) {
 
     // Compute r_i and r_i^-1
     let r_is = (0..PERM_SIZE+1)
@@ -855,7 +856,7 @@ async fn compute_permutation_argument(
         &vec![String::from("pi_1"), String::from("pi_2"), String::from("pi_3"), String::from("pi_4"), String::from("pi_5")]
     ).await;
 
-    PermutationProof {
+    (PermutationProof {
         y1: evaluator.output_wire(&h_y1).await,
         y2: evaluator.output_wire(&h_y2).await,
         y3: evaluator.output_wire(&h_y3).await,
@@ -869,7 +870,8 @@ async fn compute_permutation_argument(
         f_com,
         q_com,
         t_com
-    }
+    },
+    alpha1)
 }
 
 async fn verify_permutation_argument(
@@ -1096,7 +1098,277 @@ pub fn local_verify_sigma_proof(
     b
 }
 
-async fn encrypt_and_prove(
+/// Produces ciphertexts and links the card commitment to the ciphertexts
+async fn new_encrypt_and_prove(
+    pp: &UniversalParams<Curve>,
+    evaluator: &mut Evaluator,
+    card_handles: Vec<String>,
+    card_commitment: G1, // C = g^{\sum_i card_handles_i L_i(x) + alpha1 * (x^PERM_SIZE - 1)}
+    alpha1: String,
+    pk: G2,
+    ids: Vec<BigUint>
+) -> NewEncryptProof {
+    // Get all cards from card handles
+    let mut cards = vec![];
+    for h in card_handles.clone() {
+        cards.push(evaluator.get_wire(&h));
+    }
+
+    // Sample common randomness for encryption
+    let r = evaluator.ran();
+
+    let t_ibe = Instant::now();
+    // Encrypt the cards to ids with the same pk
+    let (c1s, c2s) = evaluator.batch_dist_ibe_encrypt(
+        &card_handles, 
+        &vec![r.clone(); PERM_SIZE], 
+        &pk, 
+        ids.as_slice()
+    ).await;
+    println!("IBE_enc: {:?}", t_ibe.elapsed());
+
+    // Encrypt an extra "card" with alpha1
+    // This id can be anything (different from the others), it will never be opened.
+    let (_, alpha1_c2) = evaluator.dist_ibe_encrypt(
+        &alpha1, 
+        &r, 
+        &pk, 
+        BigUint::from(123 as u64)
+    ).await; 
+
+    // Hash all the encryptions to get randomness for batching
+    let mut bytes = Vec::new();
+    let mut c1_bytes = Vec::new();
+    let mut c2_bytes = Vec::new();
+
+    for i in 0..PERM_SIZE {
+        c1s[i].serialize_uncompressed(&mut c1_bytes).unwrap();
+        c2s[i].serialize_uncompressed(&mut c2_bytes).unwrap();
+
+        bytes.extend_from_slice(&c1_bytes);
+        bytes.extend_from_slice(&c2_bytes);
+    }
+
+    // Add alpha1 ciphertext to the hash
+    alpha1_c2.serialize_uncompressed(&mut c2_bytes).unwrap();
+    bytes.extend_from_slice(&c2_bytes);
+
+    // define delta
+    let delta = utils::fs_hash(vec![&bytes], 1)[0];
+
+    // Evaluate the card commitment at delta and produce opening proof
+    // Modified to take into account the hiding term
+    let card_poly = utils::interpolate_poly_over_mult_subgroup(&cards);
+    let vanishing_poly = utils::compute_vanishing_poly(PERM_SIZE as usize);
+
+    // Evaluate polynomial at delta, taking into account the hiding term
+    let h_poly_eval_orig = evaluator.share_poly_eval(&card_poly, delta);
+    let h_hiding = evaluator.scale(&alpha1, vanishing_poly.evaluate(&delta));
+
+    let h_poly_eval = evaluator.add(&h_poly_eval_orig, &h_hiding);
+    let poly_eval = evaluator.output_wire(&h_poly_eval).await;
+    
+    // Produce opening proof - share
+    let pi_orig = evaluator.eval_proof_with_share_poly(
+        pp, 
+        card_poly, 
+        delta
+    ).await;
+
+    let divisor = 
+        DensePolynomial::from_coefficients_vec(vec![-delta, F::from(1)]);
+    let (quotient, _) = 
+            DenseOrSparsePolynomial::divide_with_q_and_r(
+                &(&vanishing_poly).into(),
+                &(&divisor).into(),
+            ).unwrap();
+
+    let pi_poly = utils::commit_poly(pp, &quotient);
+    let pi_share = pi_orig.clone() + pi_poly.mul(evaluator.get_wire(&alpha1)); 
+
+    let pi = evaluator.add_g1_elements_from_all_parties(&pi_share.into_affine(), &String::from("new_enc_prove_pi")).await;
+
+    // Batch the pairing bases
+    // Evaluate lagrange basis at delta
+    let mut lagrange_delta = Vec::new();
+    for i in 0..PERM_SIZE {
+        lagrange_delta.push(utils::compute_lagrange_basis(i as u64, PERM_SIZE as u64).evaluate(&delta));
+    }
+
+    // Computing E = prod_i e_i^Li(delta)
+    let mut batch_h = G1::zero();
+    for i in 0..PERM_SIZE {
+        // TODO: fix this. Need proper hash to curve
+        let x_f = F::from(ids[i].clone());
+        let hash_id = G1::generator().mul(x_f);
+        batch_h = batch_h.add(hash_id.mul(lagrange_delta[i])).into_affine();
+
+        // Add the contribution from the hiding term (multiplied with (delta^PERM_SIZE - 1))
+        if i == PERM_SIZE {
+            let x_f = F::from(BigUint::from(123 as u64));
+            let hash_id = G1::generator().mul(x_f);
+            batch_h = batch_h.add(hash_id.mul(utils::compute_power(&delta, PERM_SIZE as u64) - F::from(1))).into_affine()
+        }
+    }
+    let e_batch = <Curve as Pairing>::pairing(batch_h, pk);
+
+    // Compute t = e_batch^r
+    let t = evaluator.exp_and_reveal_gt(
+        vec![e_batch], 
+        vec![r.clone()], 
+        &String::from("new_enc_prove_t")
+    ).await;
+
+    // Sigma protocol to show that t = e_batch^r and c1 = g^r
+    // Message 1
+    // a1 = g^z
+    // a2 = e_batch^z
+
+    let z = evaluator.ran();
+    let a1 = evaluator.exp_and_reveal_g2(
+        vec![G2::generator()], 
+        vec![z.clone()], 
+        &String::from("new_enc_prove_a1")
+    ).await;
+    let a2 = evaluator.exp_and_reveal_gt(
+        vec![e_batch], 
+        vec![z.clone()], 
+        &String::from("new_enc_prove_a2")
+    ).await;
+
+    // Message 2 - FS Hash of a1,a2
+    let (mut a1_bytes, mut a2_bytes): (Vec<u8>, Vec<u8>) 
+        = (Vec::new(),Vec::new());
+    
+    a1.serialize_uncompressed(&mut a1_bytes).unwrap();
+    a2.serialize_uncompressed(&mut a2_bytes).unwrap();
+
+    let eta = utils::fs_hash(vec![&a1_bytes, &a2_bytes], 1);
+
+    // Message 3
+    let mut h_y = evaluator.scale(&r, eta[0]);
+    h_y = evaluator.add(&h_y, &z);
+    let y = evaluator.output_wire(&h_y).await;
+
+    NewEncryptProof{
+        pk: pk,
+        ids: ids,
+        card_commitment: card_commitment,
+        card_poly_eval: poly_eval,
+        eval_proof: pi,
+        ciphertexts: c1s.into_iter().zip(c2s.into_iter()).collect(),
+        hiding_ciphertext: alpha1_c2,
+        t: t,
+        sigma_proof: Some(NewSigmaProof{
+            a1: a1,
+            a2: a2,
+            eta: eta[0],
+            y: y
+        })
+    }
+
+}
+
+async fn local_verify_new_encryption_proof(
+    pp: &UniversalParams<Curve>,
+    proof: &NewEncryptProof,
+) -> bool {
+    // Check that all ciphertexts share the same randomness
+    let c1 = proof.ciphertexts[0].0.clone();
+    for i in 1..PERM_SIZE {
+        if proof.ciphertexts[i].0 != c1 {
+            return false;
+        }
+    }
+
+    // Compute delta
+    let mut bytes = Vec::new();
+    let mut c1_bytes = Vec::new();
+    let mut c2_bytes = Vec::new();
+
+    for i in 0..PERM_SIZE {
+        proof.ciphertexts[i].0.serialize_uncompressed(&mut c1_bytes).unwrap();
+        proof.ciphertexts[i].1.serialize_uncompressed(&mut c2_bytes).unwrap();
+
+        bytes.extend_from_slice(&c1_bytes);
+        bytes.extend_from_slice(&c2_bytes);
+    }
+
+    // Add alpha1 ciphertext to the hash
+    proof.hiding_ciphertext.serialize_uncompressed(&mut c2_bytes).unwrap();
+    bytes.extend_from_slice(&c2_bytes);
+
+    let delta = utils::fs_hash(vec![&bytes], 1);
+
+    // Check evaluation proof
+    if ! utils::kzg_check(
+        pp,
+        &proof.card_commitment,
+        &delta[0],
+        &proof.card_poly_eval,
+        &proof.eval_proof
+    ) {
+        return false;
+    }
+
+    // Compute e_batch
+    let mut lagrange_delta = Vec::new();
+    for i in 0..PERM_SIZE {
+        lagrange_delta.push(utils::compute_lagrange_basis(i as u64, PERM_SIZE as u64).evaluate(&delta[0]));
+    }
+
+    let mut batch_h = G1::zero();
+    for i in 0..PERM_SIZE {
+        // TODO: fix this. Need proper hash to curve
+        let x_f = F::from(proof.ids[i].clone());
+        let hash_id = G1::generator().mul(x_f);
+        batch_h = batch_h.add(hash_id.mul(lagrange_delta[i])).into_affine();
+    }
+    let e_batch = <Curve as Pairing>::pairing(batch_h, proof.pk);
+
+    // Check that prod_i c2_i^Li(delta) = g^f(delta) * t
+    let mut lhs = Gt::zero();
+    for i in 0..PERM_SIZE {
+        lhs = lhs + proof.ciphertexts[i].1.mul(lagrange_delta[i]);
+    }
+
+    let mut rhs = Gt::generator().mul(proof.card_poly_eval);
+    rhs = rhs.add(proof.t);
+
+    if ! lhs.eq(&rhs) {
+        return false;
+    }
+
+    // Check sigma proof
+    // Compute hash to get eta
+    let (mut a1_bytes, mut a2_bytes): (Vec<u8>, Vec<u8>) 
+        = (Vec::new(),Vec::new());
+
+    proof.sigma_proof.as_ref().unwrap().a1.serialize_uncompressed(&mut a1_bytes).unwrap();
+    proof.sigma_proof.as_ref().unwrap().a2.serialize_uncompressed(&mut a2_bytes).unwrap();
+
+    let eta = utils::fs_hash(vec![&a1_bytes, &a2_bytes], 1);
+
+    // Check statement 1
+    let lhs = G2::generator().mul(proof.sigma_proof.as_ref().unwrap().y);
+    let rhs = c1.mul(eta[0]).add(proof.sigma_proof.as_ref().unwrap().a1);
+
+    if ! lhs.eq(&rhs) {
+        return false;
+    }
+
+    // Check statement 2
+    let lhs = e_batch.mul(proof.sigma_proof.as_ref().unwrap().y);
+    let rhs = proof.t.mul(eta[0]).add(proof.sigma_proof.as_ref().unwrap().a2);
+
+    if ! lhs.eq(&rhs) {
+        return false;
+    }
+
+    true
+}
+
+async fn _encrypt_and_prove(
     pp: &UniversalParams<Curve>,
     evaluator: &mut Evaluator,
     card_handles: Vec<String>,
@@ -1332,7 +1604,7 @@ async fn encrypt_and_prove(
     }
 }
 
-async fn local_verify_encryption_proof(
+async fn _local_verify_encryption_proof(
     pp: &UniversalParams<Curve>,
     proof: &EncryptProof,
 ) -> bool {
@@ -1577,7 +1849,9 @@ pub async fn test_dist_kzg(evaluator: &mut Evaluator) {
     let com = evaluator.add_g1_elements_from_all_parties(&com_share, &String::from("kzg_test_com")).await;
 
     let w = utils::multiplicative_subgroup_of_size(PERM_SIZE as u64);
-    let pi = evaluator.eval_proof_with_share_poly(&pp, poly.clone(), w, String::from("kzg_test_pi")).await;
+    let pi_share = evaluator.eval_proof_with_share_poly(&pp, poly.clone(), w).await;
+
+    let pi = evaluator.add_g1_elements_from_all_parties(&pi_share, &String::from("test_dist_kzg_pi")).await;
 
     let evaluation_at_w = evaluator.share_poly_eval(&poly, w);
 

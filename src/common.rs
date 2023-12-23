@@ -67,6 +67,18 @@ pub struct EncryptProof {
     pub sigma_proof: Option<SigmaProof>,
 }
 
+pub struct NewEncryptProof {
+    pub pk: G2,
+    pub ids: Vec<BigUint>,
+    pub card_commitment: G1,
+    pub card_poly_eval: F,
+    pub eval_proof: G1,
+    pub ciphertexts: Vec<(G2,Gt)>,
+    pub hiding_ciphertext: Gt,
+    pub t: Gt,
+    pub sigma_proof: Option<NewSigmaProof>,
+}
+
 impl EncryptProof {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -121,5 +133,12 @@ pub struct SigmaProof {
     pub a2: G2,
     pub a3: Gt,
     pub x: F,
+    pub y: F,
+}
+
+pub struct NewSigmaProof {
+    pub a1: G2,
+    pub a2: Gt,
+    pub eta: F,
     pub y: F,
 }
