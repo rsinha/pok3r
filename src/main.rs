@@ -1118,9 +1118,9 @@ async fn new_encrypt_and_prove(
 
     let t_ibe = Instant::now();
     // Encrypt the cards to ids with the same pk
-    let (c1s, c2s) = evaluator.batch_dist_ibe_encrypt(
+    let (c1, c2s) = evaluator.batch_dist_ibe_encrypt_with_common_mask(
         &card_handles, 
-        &vec![r.clone(); PERM_SIZE], 
+        &r, 
         &pk, 
         ids.as_slice()
     ).await;
@@ -1140,11 +1140,11 @@ async fn new_encrypt_and_prove(
     let mut c1_bytes = Vec::new();
     let mut c2_bytes = Vec::new();
 
-    for i in 0..PERM_SIZE {
-        c1s[i].serialize_uncompressed(&mut c1_bytes).unwrap();
-        c2s[i].serialize_uncompressed(&mut c2_bytes).unwrap();
+    c1.serialize_uncompressed(&mut c1_bytes).unwrap();
+    bytes.extend_from_slice(&c1_bytes);
 
-        bytes.extend_from_slice(&c1_bytes);
+    for i in 0..PERM_SIZE {
+        c2s[i].serialize_uncompressed(&mut c2_bytes).unwrap();
         bytes.extend_from_slice(&c2_bytes);
     }
 
@@ -1255,7 +1255,7 @@ async fn new_encrypt_and_prove(
         card_commitment: card_commitment,
         card_poly_eval: poly_eval,
         eval_proof: pi,
-        ciphertexts: c1s.into_iter().zip(c2s.into_iter()).collect(),
+        ciphertexts: (c1, c2s),
         hiding_ciphertext: alpha1_c2,
         t: t,
         sigma_proof: Some(NewSigmaProof{
@@ -1274,24 +1274,19 @@ async fn local_verify_new_encryption_proof(
 ) -> bool {
     let mut b = true;
 
-    // Check that all ciphertexts share the same randomness
-    let c1 = proof.ciphertexts[0].0.clone();
-    for i in 1..PERM_SIZE {
-        if proof.ciphertexts[i].0 != c1 {
-            return false;
-        }
-    }
+    // Common first element of all ciphertexts
+    let c1 = proof.ciphertexts.0.clone();
 
     // Compute delta
     let mut bytes = Vec::new();
     let mut c1_bytes = Vec::new();
     let mut c2_bytes = Vec::new();
 
-    for i in 0..PERM_SIZE {
-        proof.ciphertexts[i].0.serialize_uncompressed(&mut c1_bytes).unwrap();
-        proof.ciphertexts[i].1.serialize_uncompressed(&mut c2_bytes).unwrap();
+    c1.serialize_uncompressed(&mut c1_bytes).unwrap();
+    bytes.extend_from_slice(&c1_bytes);
 
-        bytes.extend_from_slice(&c1_bytes);
+    for i in 0..PERM_SIZE {
+        proof.ciphertexts.1[i].serialize_uncompressed(&mut c2_bytes).unwrap();
         bytes.extend_from_slice(&c2_bytes);
     }
 
@@ -1337,7 +1332,7 @@ async fn local_verify_new_encryption_proof(
     // Check that prod_i c2_i^Li(delta) * alpha1_c2*(delta*PERM_SIZE - 1) = g^f(delta) * t
     let mut lhs = Gt::zero();
     for i in 0..PERM_SIZE {
-        lhs = lhs + proof.ciphertexts[i].1.mul(lagrange_delta[i]);
+        lhs = lhs + proof.ciphertexts.1[i].mul(lagrange_delta[i]);
 
         // Add hiding_ciphertext
         if i == PERM_SIZE-1 {

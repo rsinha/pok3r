@@ -1240,6 +1240,58 @@ impl Evaluator {
         (c1s, c2s)
     }
 
+    /// Same as dist_batch_ibe_encrypt, but with common mask
+    pub async fn batch_dist_ibe_encrypt_with_common_mask(
+        &mut self, 
+        msg_share_handles: &[String], // [z1]
+        mask_share_handle: &String, // [r]
+        pk: &G2, 
+        ids: &[BigUint]
+    ) -> (G2, Vec<Gt>) {
+        // Compute e_i^r
+        let e_is = ids
+            .iter()
+            .map(|id| {
+                let x_f = F::from(id.clone());
+                let hash_id_pow_r = G1::generator().mul(x_f).mul(self.get_wire(&mask_share_handle));
+
+                <Curve as Pairing>::pairing(hash_id_pow_r, pk)
+            })
+            .collect::<Vec<Gt>>();
+
+        let c1 = self.exp_and_reveal_g2(
+            vec![<Curve as Pairing>::G2Affine::generator()], 
+            vec![mask_share_handle.clone()], 
+            &String::from("ibe_c1_".to_owned() + mask_share_handle)
+        ).await;
+
+        // Vector of 64 elements, where the i^th element is a vector [g, e_i^r]
+        let gt_with_e_is = (0..msg_share_handles.len())
+            .into_iter()
+            .map(|i| vec![Gt::generator(), e_is[i].clone()])
+            .collect::<Vec<Vec<Gt>>>();
+
+        // Vector of 64 elements, where the i^th element is a vector [msg_i, 1]
+        let one_wire_handle = self.compute_fresh_wire_label();
+        self.wire_shares.insert(one_wire_handle.clone(), F::one());
+
+        let msg_mask_interleaved = msg_share_handles
+            .iter()
+            .map(|m| vec![m.clone(), one_wire_handle.clone()])
+            .collect::<Vec<Vec<String>>>();
+
+        let c2s = self.batch_exp_and_reveal_gt(
+            gt_with_e_is, 
+            msg_mask_interleaved, 
+            msg_share_handles
+                .iter()
+                .map(|h| String::from("ibe_c2".to_owned() + h))
+                .collect::<Vec<String>>()
+        ).await;
+
+        (c1, c2s)
+    }
+
     //returns the handle which 
     fn process_next_message(&mut self, msg: &EvalNetMsg) {
         match msg {

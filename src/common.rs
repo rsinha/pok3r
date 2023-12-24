@@ -73,7 +73,7 @@ pub struct NewEncryptProof {
     pub card_commitment: G1,
     pub card_poly_eval: F,
     pub eval_proof: G1,
-    pub ciphertexts: Vec<(G2,Gt)>,
+    pub ciphertexts: (G2,Vec<Gt>),
     pub hiding_ciphertext: Gt,
     pub t: Gt,
     pub sigma_proof: Option<NewSigmaProof>,
