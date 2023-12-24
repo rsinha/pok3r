@@ -1,4 +1,5 @@
 
+use ark_bls12_377::G1Projective;
 use ark_ec::{Group, pairing::*};
 use ark_poly::DenseUVPolynomial;
 use ark_poly::univariate::DenseOrSparsePolynomial;
@@ -363,8 +364,10 @@ impl Evaluator {
         let mut x_plus_a_handles: Vec<String> = Vec::new();
         let mut y_plus_b_handles: Vec<String> = Vec::new();
 
+        let beavers = self.batch_beaver(len);
+
         for i in 0..len {
-            let (h_a, h_b, h_c) = self.beaver().await;
+            let (h_a, h_b, h_c) = beavers[i].clone();
 
             bookkeeping_a.push(self.get_wire(&h_a));
             bookkeeping_b.push(self.get_wire(&h_b));
@@ -525,6 +528,61 @@ impl Evaluator {
         (handle_a, handle_b, handle_c)
     }
 
+    pub fn batch_beaver(&mut self, num_beavers: usize) -> Vec<(String, String, String)> {
+        let n: usize = self.addr_book.len();
+        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
+
+        let mut seeded_rng = StdRng::from_seed([42u8; 32]);
+
+        let handles_a: Vec<String> = (0..num_beavers)
+            .into_iter()
+            .map(|_| self.compute_fresh_wire_label())
+            .collect();
+        let handles_b: Vec<String> = (0..num_beavers)
+            .into_iter()
+            .map(|_| self.compute_fresh_wire_label())
+            .collect();
+        let handles_c: Vec<String> = (0..num_beavers)
+            .into_iter()
+            .map(|_| self.compute_fresh_wire_label())
+            .collect();
+
+        let mut sum_a = vec![F::from(0); num_beavers];
+        let mut sum_b = vec![F::from(0); num_beavers];
+        let mut sum_c = vec![F::from(0); num_beavers];
+
+        for i in 0..num_beavers {
+            for j in 1..n {
+                let party_j_share_a =  F::rand(&mut seeded_rng);
+                let party_j_share_b =  F::rand(&mut seeded_rng);
+                let party_j_share_c =  F::rand(&mut seeded_rng);
+
+                sum_a[i] += party_j_share_a;
+                sum_b[i] += party_j_share_b;
+                sum_c[i] += party_j_share_c;
+
+                if j == (my_id as usize) {
+                    self.wire_shares.insert(handles_a[i].clone(), party_j_share_a);
+                    self.wire_shares.insert(handles_b[i].clone(), party_j_share_b);
+                    self.wire_shares.insert(handles_c[i].clone(), party_j_share_c);
+                }
+            }
+
+            if my_id == 0 {
+                self.wire_shares.insert(handles_a[i].clone(), F::from(0) - sum_a[i]);
+                self.wire_shares.insert(handles_b[i].clone(), F::from(0) - sum_b[i]);
+                self.wire_shares.insert(handles_c[i].clone(), F::from(0) - sum_c[i]);
+            }
+        }
+
+        let mut output = Vec::new();
+        for i in 0..num_beavers {
+            output.push((handles_a[i].clone(), handles_b[i].clone(), handles_c[i].clone()));
+        }
+
+        output
+    }
+
     pub async fn output_wire(&mut self, wire_handle: &String) -> F {
         let my_share = self.get_wire(wire_handle);
 
@@ -621,7 +679,7 @@ impl Evaluator {
 
     pub async fn batch_output_wire_in_exponent(&mut self, wire_handles: &[String]) -> Vec<G1> {
         let mut my_share_exps = Vec::new();
-        let g = <Curve as Pairing>::G1Affine::generator();
+        let g = G1::generator();
         for i in 0..wire_handles.len() {
             let my_share = self.get_wire(&wire_handles[i]);
             let my_share_exp = g.clone().mul(my_share).into_affine();
