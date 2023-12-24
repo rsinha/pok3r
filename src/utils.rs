@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+use ark_bls12_377::{G1Projective as G1, G2Projective as G2};
 use ark_crypto_primitives::crh::sha256::Sha256;
 use rand::{rngs::StdRng, SeedableRng};
 use ark_ff::{Field, FftField, PrimeField};
@@ -31,9 +32,10 @@ use crate::kzg::UniversalParams;
 type Curve = ark_bls12_377::Bls12_377;
 type KZG = crate::kzg::KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 type F = ark_bls12_377::Fr;
-type G1 = <Curve as Pairing>::G1Affine;
-type G2 = <Curve as Pairing>::G2Affine;
+type G1Affine = <Curve as Pairing>::G1Affine;
+type G2Affine = <Curve as Pairing>::G2Affine;
 type G1Config = ark_ec::short_weierstrass::Affine<ark_bls12_377::g1::Config>;
+
 
 macro_rules! requires_power_of_2 {
     ($x:expr) => {
@@ -99,11 +101,11 @@ pub fn setup_kzg(n: usize) -> UniversalParams<Curve> {
 }
 
 pub fn commit_poly(pp: &UniversalParams<Curve>, f: &DensePolynomial<F>) -> G1 {
-    KZG::commit_g1(pp, f).unwrap()
+    KZG::commit_g1(pp, f).unwrap().into()
 }
 
 pub fn kzg_check(pp: &UniversalParams<Curve>, comm: &G1, x: &F, eval: &F, proof: &G1) -> bool {
-    let b = KZG::check(pp, &comm, *x, *eval, &proof);
+    let b = KZG::check(pp, &comm.into_affine(), *x, *eval, &proof.into_affine());
     b
 }
 

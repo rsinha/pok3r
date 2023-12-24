@@ -1,5 +1,5 @@
 
-use ark_bls12_377::G1Projective;
+use ark_bls12_377::{ G1Projective, G2Projective };
 use ark_ec::{Group, pairing::*};
 use ark_poly::DenseUVPolynomial;
 use ark_poly::univariate::DenseOrSparsePolynomial;
@@ -7,7 +7,7 @@ use ark_poly::univariate::DensePolynomial;
 use ark_std::UniformRand;
 use ark_ff::{Field, /* FftField */ };
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
-use ark_ec::{pairing::Pairing, CurveGroup, AffineRepr};
+use ark_ec::{pairing::Pairing, AffineRepr};
 use ark_std::{Zero, One};
 use std::collections::HashMap;
 use std::ops::*;
@@ -26,9 +26,9 @@ use crate::utils;
 pub type Curve = ark_bls12_377::Bls12_377;
 //type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 pub type F = ark_bls12_377::Fr;
-pub type G1 = <Curve as Pairing>::G1Affine;
-pub type G2 = <Curve as Pairing>::G2Affine;
 pub type Gt = PairingOutput<Curve>;
+pub type G1 = G1Projective;
+pub type G2 = G2Projective;
 
 macro_rules! send_over_network {
     ($msg:expr, $tx:expr) => {
@@ -669,7 +669,7 @@ impl Evaluator {
     pub async fn output_wire_in_exponent(&mut self, wire_handle: &String) -> G1 {
         let my_share = self.get_wire(wire_handle);
         let g = <Curve as Pairing>::G1Affine::generator();
-        let my_share_exp = g.clone().mul(my_share).into_affine();
+        let my_share_exp = g.clone().mul(my_share);
         
         self.add_g1_elements_from_all_parties(
             &my_share_exp, 
@@ -682,7 +682,7 @@ impl Evaluator {
         let g = G1::generator();
         for i in 0..wire_handles.len() {
             let my_share = self.get_wire(&wire_handles[i]);
-            let my_share_exp = g.clone().mul(my_share).into_affine();
+            let my_share_exp = g.clone().mul(my_share);
             my_share_exps.push(my_share_exp);
         }
 
@@ -713,7 +713,7 @@ impl Evaluator {
             .collect();
 
         let mut sum: G1 = value.clone();
-        for v in incoming_values { sum = sum.add(v).into_affine(); }
+        for v in incoming_values { sum = sum.add(v); }
         sum
     }
 
@@ -768,7 +768,7 @@ impl Evaluator {
 
             let sum = incoming_values
                 .iter()
-                .fold(inputs[i], |acc, v| acc.add(v).into_affine());
+                .fold(inputs[i], |acc, v| acc.add(v));
 
             outputs.push(sum);
         }
@@ -796,7 +796,7 @@ impl Evaluator {
             .collect();
 
         let mut sum: G2 = value.clone();
-        for v in incoming_values { sum = sum.add(v).into_affine(); }
+        for v in incoming_values { sum = sum.add(v); }
         sum
     }
 
@@ -852,7 +852,7 @@ impl Evaluator {
 
             let sum = incoming_values
                 .iter()
-                .fold(inputs[i], |acc, v| acc.add(v).into_affine());
+                .fold(inputs[i], |acc, v| acc.add(v));
 
             outputs.push(sum);
         }
@@ -1011,9 +1011,9 @@ impl Evaluator {
         // Compute \sum_i g_i^[x_i]
         for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
             let my_share = self.get_wire(exponent_handle);
-            let exponentiated = base.clone().mul(my_share).into_affine();
+            let exponentiated = base.clone().mul(my_share);
 
-            sum = sum.add(exponentiated).into_affine();
+            sum = sum.add(exponentiated);
         }
 
         self.add_g1_elements_from_all_parties(&sum, identifier).await
@@ -1037,8 +1037,8 @@ impl Evaluator {
             let mut sum = G1::zero();
 
             for (base, exponent_handle) in msm_input {
-                let exponentiated = base.mul(self.get_wire(exponent_handle)).into_affine();
-                sum = sum.add(exponentiated).into_affine();
+                let exponentiated = base.mul(self.get_wire(exponent_handle));
+                sum = sum.add(exponentiated);
             }
 
             group_elements.push(sum);
@@ -1058,9 +1058,9 @@ impl Evaluator {
         // Compute \sum_i g_i^[x_i]
         for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
             let my_share = self.get_wire(exponent_handle);
-            let exponentiated = base.clone().mul(my_share).into_affine();
+            let exponentiated = base.clone().mul(my_share);
 
-            sum = sum.add(exponentiated).into_affine();
+            sum = sum.add(exponentiated);
         }
 
         self.add_g2_elements_from_all_parties(&sum, identifier).await
@@ -1084,8 +1084,8 @@ impl Evaluator {
             let mut sum = G2::zero();
 
             for (base, exponent_handle) in msm_input {
-                let exponentiated = base.mul(self.get_wire(exponent_handle)).into_affine();
-                sum = sum.add(exponentiated).into_affine();
+                let exponentiated = base.mul(self.get_wire(exponent_handle));
+                sum = sum.add(exponentiated);
             }
 
             group_elements.push(sum);
@@ -1226,7 +1226,7 @@ impl Evaluator {
         let h = <Curve as Pairing>::pairing(hash_id, pk);
     
         let c1 = self.exp_and_reveal_g1(
-            vec![<Curve as Pairing>::G1Affine::generator()], 
+            vec![G1::generator()], 
             vec![mask_share_handle.clone()], 
             &String::from("ibe_c1_".to_owned() + msg_share_handle + mask_share_handle)
         ).await;
@@ -1262,7 +1262,7 @@ impl Evaluator {
             .collect::<Vec<Gt>>();
 
         let c1s = self.batch_exp_and_reveal_g2(
-            vec![vec![<Curve as Pairing>::G2Affine::generator()]; msg_share_handles.len()], 
+            vec![vec![G2::generator()]; msg_share_handles.len()], 
             vec![mask_share_handles.to_vec(); PERM_SIZE], 
             msg_share_handles
                 .iter()
@@ -1318,7 +1318,7 @@ impl Evaluator {
             .collect::<Vec<Gt>>();
 
         let c1 = self.exp_and_reveal_g2(
-            vec![<Curve as Pairing>::G2Affine::generator()], 
+            vec![G2::generator()], 
             vec![mask_share_handle.clone()], 
             &String::from("ibe_c1_".to_owned() + mask_share_handle)
         ).await;
