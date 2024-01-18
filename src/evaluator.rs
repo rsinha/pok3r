@@ -107,6 +107,17 @@ impl Evaluator {
         }
     }
 
+    fn get_king_indices(&mut self, batch_size: usize) -> Vec<usize> {
+        let num_nodes = self.addr_book.len();
+        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap() as usize;
+
+        // return all indices such that index mod num_nodes == my_id
+        (0..batch_size)
+            .into_iter()
+            .filter(|x| x % num_nodes == my_id)
+            .collect::<Vec<usize>>()
+    }
+
     fn compute_fresh_wire_label(&mut self) -> String {
         self.gate_counter += 1;
 
@@ -722,16 +733,18 @@ impl Evaluator {
         inputs: &[G1],
         identifiers: &[String]
     ) -> Vec<G1> {
+        println!("batch_add_g1_elements_from_all_parties, len: {}", inputs.len());
         assert_eq!(inputs.len(), identifiers.len());
         let len = inputs.len();
 
-        let mut outputs = Vec::new();
-
+        // encode all G1 elements as base58 strings
         let values = inputs
             .into_iter()
             .map(|e| encode_g1_as_bs58_str(e))
             .collect::<Vec<String>>();
 
+        // if we are sending out a lot of elements, we will 
+        // break them into buckets of 256 elements each
         if len > 256 {
             let mut processed_len = 0;
 
@@ -750,7 +763,7 @@ impl Evaluator {
                 processed_len += this_iter_len;
             }
         }
-        else {
+        else { // small enough batch to send out in one go
             let msg = EvalNetMsg::PublishBatchValue {
                 sender: self.id.clone(),
                 handles: identifiers.into(),
@@ -759,7 +772,12 @@ impl Evaluator {
             send_over_network!(msg, self.tx);
         }
 
-        for i in 0..inputs.len() {
+        // figure out what indices I am the king for
+        let king_indices = self.get_king_indices(identifiers.len());
+        let mut my_work = Vec::new();
+
+        // perform the work for which I am the king
+        for &i in king_indices.iter() {
             let incoming_msgs = self.collect_messages_from_all_peers(&identifiers[i]).await;
             let incoming_values: Vec<G1> = incoming_msgs
                 .into_iter()
@@ -770,7 +788,47 @@ impl Evaluator {
                 .iter()
                 .fold(inputs[i], |acc, v| acc.add(v));
 
-            outputs.push(sum);
+                my_work.push(sum);
+        }
+
+        let bs58_outputs = my_work
+            .iter()
+            .map(|e| encode_g1_as_bs58_str(&e))
+            .collect::<Vec<String>>();
+
+        // broadcast the results to all parties
+        // add a prefix to all identifiers
+        let msg = EvalNetMsg::PublishBatchValue {
+            sender: self.id.clone(),
+            handles: king_indices
+                .iter()
+                .map(|&i| "reserved_batch_g1__".to_string() + &identifiers[i])
+                .collect::<Vec<String>>(),
+            values: bs58_outputs,
+        };
+        send_over_network!(msg, self.tx);
+
+
+        // collect the results from all other kings
+
+        let mut outputs = Vec::new();
+        for i in 0..len {
+
+            let incoming_id = "reserved_batch_g1__".to_string() + &identifiers[i];
+            let king_node_id = i % self.addr_book.len();
+            let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap() as usize;
+
+            if king_node_id != my_id {
+                let king_node_id = get_peer_id_via_node_id(&self.addr_book, king_node_id as u64).unwrap();
+                let incoming_msg = self.collect_message_from_one_peer(&king_node_id, &incoming_id).await;
+                let sum = decode_bs58_str_as_g1(&incoming_msg);
+
+                outputs.push(sum);
+            } else {
+                // grab the result from my own work
+                let index_within_my_work = i / self.addr_book.len();
+                outputs.push(my_work[index_within_my_work]);
+            }
         }
 
         outputs
@@ -1480,7 +1538,41 @@ impl Evaluator {
         messages
     }
 
+    async fn collect_message_from_one_peer(
+        &mut self,
+        peer_id: &Pok3rPeerId,
+        identifier: &String
+    ) -> String {
+        loop { //loop over all incoming messages till we find msg from peer
+            if self.mailbox.contains_key(identifier) {
+                let sender_exists_for_handle = self.mailbox
+                    .get(identifier)
+                    .unwrap()
+                    .contains_key(peer_id);
+                    //if we already have it, break out!
+                if sender_exists_for_handle { break; }
+            }
+
+            let msg: EvalNetMsg = self.rx.select_next_some().await;
+            self.process_next_message(&msg);
+        }
+
+        // if we got here, we can assume we have the message from peer_id
+        let msg = self.mailbox
+            .get(identifier)
+            .unwrap()
+            .get(peer_id)
+            .unwrap()
+            .clone();
+
+        //clear the mailbox because we might want to use identifier again
+        self.mailbox.remove(identifier);
+
+        msg
+    }
+
 }
+
 
 
 fn encode_f_as_bs58_str(value: &F) -> String {
