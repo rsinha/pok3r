@@ -796,21 +796,47 @@ impl Evaluator {
             .map(|e| encode_g1_as_bs58_str(&e))
             .collect::<Vec<String>>();
 
-        // broadcast the results to all parties
-        // add a prefix to all identifiers
-        let msg = EvalNetMsg::PublishBatchValue {
-            sender: self.id.clone(),
-            handles: king_indices
-                .iter()
-                .map(|&i| "reserved_batch_g1__".to_string() + &identifiers[i])
-                .collect::<Vec<String>>(),
-            values: bs58_outputs,
-        };
-        send_over_network!(msg, self.tx);
+        let handles = king_indices
+            .iter()
+            .map(|&i| "reserved_batch_g1__".to_string() + &identifiers[i])
+            .collect::<Vec<String>>();
 
+
+        // if we are sending out a lot of elements, we will 
+        // break them into buckets of 256 elements each
+        let len = king_indices.len();
+        if len > 256 {
+            let mut processed_len = 0;
+
+            while processed_len < len {
+                let this_iter_len = std::cmp::min(len - processed_len, 256);
+                let handles_bucket = &handles[processed_len..processed_len + this_iter_len].to_vec();
+                let values_bucket = &bs58_outputs[processed_len..processed_len + this_iter_len].to_vec();
+
+                let msg = EvalNetMsg::PublishBatchValue {
+                    sender: self.id.clone(),
+                    handles: handles_bucket.to_owned(),
+                    values: values_bucket.to_owned(),
+                };
+
+                send_over_network!(msg, self.tx);
+
+                processed_len += this_iter_len;
+            }
+        }
+        else {
+            let msg = EvalNetMsg::PublishBatchValue {
+                sender: self.id.clone(),
+                handles: handles,
+                values: bs58_outputs,
+            };
+
+            send_over_network!(msg, self.tx);
+        }
 
         // collect the results from all other kings
 
+        let len = inputs.len();
         let mut outputs = Vec::new();
         for i in 0..len {
 
