@@ -239,7 +239,7 @@ async fn main() {
         .collect::<Vec<BigUint>>();
 
     // Encrypt and prove
-    let s_encrypt = Instant::now();
+    //let s_encrypt = Instant::now();
     let encrypt_proof = new_encrypt_and_prove(
         &pp, 
         &mut mpc, 
@@ -250,8 +250,8 @@ async fn main() {
         ids.clone()
     ).await;
 
-    let t_encrypt = s_encrypt.elapsed();
-    println!("encrypt_and_prove: {:?}", t_encrypt);
+    //let t_encrypt = s_encrypt.elapsed();
+    //println!("encrypt_and_prove: {:?}", t_encrypt);
 
     println!("total_MPC_time: {:?}", s_total.elapsed());
 
@@ -1124,7 +1124,7 @@ async fn new_encrypt_and_prove(
         &pk, 
         ids.as_slice()
     ).await;
-    println!("IBE_enc: {:?}", t_ibe.elapsed());
+    println!("encryption: {:?}", t_ibe.elapsed());
 
     // Encrypt an extra "card" with alpha1
     // This id can be anything (different from the others), it will never be opened.
@@ -1135,6 +1135,8 @@ async fn new_encrypt_and_prove(
         BigUint::from(123 as u64)
     ).await; 
 
+    let t_ctxt_proof = Instant::now();
+    
     // Hash all the encryptions to get randomness for batching
     let mut bytes = Vec::new();
     let mut c1_bytes = Vec::new();
@@ -1248,6 +1250,8 @@ async fn new_encrypt_and_prove(
     let mut h_y = evaluator.scale(&r, eta[0]);
     h_y = evaluator.add(&h_y, &z);
     let y = evaluator.output_wire(&h_y).await;
+
+    println!("ctxt proof: {:?}", t_ctxt_proof.elapsed());
 
     NewEncryptProof{
         pk: pk,
