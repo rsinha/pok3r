@@ -255,6 +255,10 @@ async fn main() {
 
     println!("total_MPC_time: {:?}", s_total.elapsed());
 
+    // Print the number of beaver triples consumed
+    let beaver_triples = mpc.get_beaver_counter();
+    println!("Beaver triples consumed: {:?}", beaver_triples);
+
     // let x_f = F::from(ids[15].clone());
     // let hash_id_15 = G1::generator().mul(x_f);
     // let dec_key = (hash_id_15 * msk);

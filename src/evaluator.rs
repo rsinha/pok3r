@@ -54,7 +54,9 @@ pub struct Evaluator {
     /// stores incoming messages indexed by identifier and then by peer id
     mailbox: HashMap<String, HashMap<String, String>>,
     /// keep track of gates
-    gate_counter: u64
+    gate_counter: u64,
+    /// keep track of the number of beaver triples consumed
+    beaver_counter: u64
 }
 
 impl Evaluator {
@@ -88,7 +90,8 @@ impl Evaluator {
             rx,
             wire_shares: HashMap::new(),
             mailbox: HashMap::new(),
-            gate_counter: 0
+            gate_counter: 0,
+            beaver_counter: 0
         }
     }
 
@@ -119,6 +122,11 @@ impl Evaluator {
         let hash = hasher.finalize();
     
         bs58::encode(hash).into_string()
+    }
+
+    /// Return the number of beaver triples consumed
+    pub fn get_beaver_counter(&self) -> u64 {
+        self.beaver_counter
     }
     
 
@@ -490,6 +498,9 @@ impl Evaluator {
     }
 
     pub async fn beaver(&mut self) -> (String, String, String) {
+        // Update beaver counter
+        self.beaver_counter += 1;
+
         let n: usize = self.addr_book.len();
         let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
 
@@ -529,6 +540,9 @@ impl Evaluator {
     }
 
     pub fn batch_beaver(&mut self, num_beavers: usize) -> Vec<(String, String, String)> {
+        // Update beaver counter
+        self.beaver_counter += num_beavers as u64;
+
         let n: usize = self.addr_book.len();
         let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
 
