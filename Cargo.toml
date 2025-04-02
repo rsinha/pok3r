@@ -23,7 +23,7 @@ ark-serialize = { version = "^0.4.0", default-features = true }
 ark-crypto-primitives = { version = "0.4.0", default-features = false, features = [ "crh" ] }
 num-bigint = { version = "0.4.0", default-features = false }
 
-rand = "*"
+rand = "0.8"
 paste = { version = "1.0" }
 crossbeam = { version = "0.8.2" }
 tracing = { version = "0.1", default-features = false, features = [ "attributes" ] }
@@ -35,8 +35,8 @@ env_logger = "0.10.0"
 futures = "0.3.28"
 libp2p = { version = "0.52.0", features = ["async-std", "gossipsub", "mdns", "noise", "macros", "tcp", "yamux"] }
 libp2p-quic = { version = "0.8.0-alpha", features = ["async-std"] }
-clap = { version = "4.3.17", default_features = false, features = ["std", "derive"] }
-serde = { version = "1", default_features = false, features = ["derive"] }
+clap = { version = "4.3.17", default-features = false, features = ["std", "derive"] }
+serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "*" }
 bs58 = { version = "*" }
 

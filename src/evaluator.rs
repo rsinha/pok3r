@@ -20,11 +20,11 @@ use rand::{rngs::StdRng, SeedableRng};
 
 use crate::address_book::*;
 use crate::common::*;
-use crate::kzg::UniversalParams;
+use crate::kzg::*;
 use crate::utils;
 
 pub type Curve = ark_bls12_377::Bls12_377;
-//type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
+type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 pub type F = ark_bls12_377::Fr;
 pub type Gt = PairingOutput<Curve>;
 pub type G1 = G1Projective;
@@ -1165,8 +1165,8 @@ impl Evaluator {
                 &(&divisor).into(),
             ).unwrap();
 
-        let pi_poly = utils::commit_poly(pp, &quotient);
-        let pi = self.add_g1_elements_from_all_parties(&pi_poly, &f_name).await;
+        let pi_poly = KZG::commit_g1(pp, &quotient);
+        let pi = self.add_g1_elements_from_all_parties(&pi_poly.into(), &f_name).await;
 
         pi
     }
@@ -1184,10 +1184,10 @@ impl Evaluator {
                 &(&divisor).into(),
             ).unwrap();
 
-        let pi_poly = utils::commit_poly(pp, &quotient);
+        let pi_poly = KZG::commit_g1(pp, &quotient);
         // let pi = self.add_g1_elements_from_all_parties(&pi_poly, &f_name).await;
 
-        pi_poly
+        pi_poly.into()
     }
 
     pub async fn batch_eval_proof_with_share_poly(
@@ -1215,8 +1215,8 @@ impl Evaluator {
                     &(&divisor).into(),
                 ).unwrap();
 
-            let pi_poly = utils::commit_poly(pp, &quotient);
-            pi_share_vec.push(pi_poly);
+            let pi_poly = KZG::commit_g1(pp, &quotient);
+            pi_share_vec.push(pi_poly.into());
         }
 
         pi_share_vec

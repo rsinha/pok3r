@@ -96,16 +96,12 @@ pub fn interpolate_poly_over_mult_subgroup(v: &Vec<F>) -> DensePolynomial<F> {
 // Generate setup with fixed seed to make sure all parties use the same KZG params
 pub fn setup_kzg(n: usize) -> UniversalParams<Curve> {
     let mut seeded_rng = StdRng::from_seed([42u8; 32]);
-    let params = KZG::setup(n, &mut seeded_rng).expect("Setup failed");
+    let params = KZG::setup(n, &mut seeded_rng);
     params
 }
 
-pub fn commit_poly(pp: &UniversalParams<Curve>, f: &DensePolynomial<F>) -> G1 {
-    KZG::commit_g1(pp, f).unwrap().into()
-}
-
 pub fn kzg_check(pp: &UniversalParams<Curve>, comm: &G1, x: &F, eval: &F, proof: &G1) -> bool {
-    let b = KZG::check(pp, &comm.into_affine(), *x, *eval, &proof.into_affine());
+    let b = KZG::verify_opening_proof(pp, &comm.into_affine(), *x, *eval, &proof.into_affine());
     b
 }
 

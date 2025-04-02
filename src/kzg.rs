@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-use ark_ec::{pairing::Pairing, CurveGroup};
+use ark_ec::{pairing::Pairing, CurveGroup, AffineRepr};
 use ark_ec::{scalar_mul::fixed_base::FixedBase, VariableBaseMSM};
 use ark_ff::{One, PrimeField, UniformRand, Zero};
 use ark_poly::DenseUVPolynomial;
@@ -64,6 +64,26 @@ where
         };
 
         pp
+    }
+
+    pub fn verify_opening_proof(
+        params: &UniversalParams<E>,
+        comm: &E::G1Affine,
+        point: E::ScalarField,
+        value: E::ScalarField,
+        proof: &E::G1Affine,
+    ) -> bool {
+        let g = params.powers_of_g[0];
+        let h = params.powers_of_h[0];
+        let beta_h = params.powers_of_h[1];
+
+        let inner = comm.into_group() - &g.mul(value);
+        let lhs = E::pairing(inner, h);
+
+        let inner = beta_h.into_group() - &h.mul(point);
+        let rhs = E::pairing(proof, inner);
+
+        lhs == rhs
     }
 
     pub fn commit_g1(params: &UniversalParams<E>, polynomial: &P) -> E::G1Affine {

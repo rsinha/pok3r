@@ -7,7 +7,7 @@ use ark_std::{Zero, One, UniformRand};
 use async_std::task;
 use futures::channel::*;
 use clap::Parser;
-use kzg::UniversalParams;
+use kzg::{UniversalParams, KZG10};
 use num_bigint::BigUint;
 use rand::{rngs::StdRng, SeedableRng};
 use serde_json::json;
@@ -461,15 +461,15 @@ async fn compute_permutation_argument(
     let f_name = String::from("perm_f");
     let f_share = 
         utils::interpolate_poly_over_mult_subgroup(card_share_values);
-    let f_share_com = utils::commit_poly(pp, &f_share);
+    let f_share_com = KZG10::commit_g1(pp, &f_share);
 
     // Commit to hiding polynomials [alpha1,alpha2]*(x^PERM_SIZE - 1)
     let alpha1 = evaluator.ran();
     let alpha2 = evaluator.ran();
     
     let vanishing_poly = utils::compute_vanishing_poly(PERM_SIZE);
-    let alpha1_vanish_poly_share_com = utils::commit_poly(pp, &vanishing_poly).mul(evaluator.get_wire(&alpha1));
-    let alpha2_vanish_poly_share_com = utils::commit_poly(pp, &vanishing_poly).mul(evaluator.get_wire(&alpha2));
+    let alpha1_vanish_poly_share_com = KZG10::commit_g1(pp, &vanishing_poly).mul(evaluator.get_wire(&alpha1));
+    let alpha2_vanish_poly_share_com = KZG10::commit_g1(pp, &vanishing_poly).mul(evaluator.get_wire(&alpha2));
 
     // Commit to f(X) + alpha1 * (x^PERM_SIZE - 1)
     // Note that the polynomial itself isn't being changed, just the commitment.
@@ -487,7 +487,7 @@ async fn compute_permutation_argument(
     let v = utils::interpolate_poly_over_mult_subgroup(&v_evals);
     
     // Commit to v(X)
-    let v_com = utils::commit_poly(pp, &v);
+    let v_com = KZG10::commit_g1(pp, &v);
 
     // 12: Parties locally compute γ1 = FSHash(C,V )
     // Hash v_com and f_com to obtain randomness for batching
@@ -517,7 +517,7 @@ async fn compute_permutation_argument(
         utils::interpolate_poly_over_mult_subgroup(&g_eval_shares.clone());
 
     // Commit to g(X) - the hiding variant derived from f(X): just add alpha1 * (x^PERM_SIZE - 1)
-    let g_share_com = utils::commit_poly(pp, &g_share_poly);
+    let g_share_com = KZG10::commit_g1(pp, &g_share_poly);
     let hiding_g_com = g_share_com + alpha1_vanish_poly_share_com;
     let g_com = evaluator.add_g1_elements_from_all_parties(&hiding_g_com, &String::from("perm_g")).await;
 
@@ -622,7 +622,7 @@ async fn compute_permutation_argument(
         .map(|x| x.1)
         .collect();
     let t_share_poly = utils::interpolate_poly_over_mult_subgroup(&t_shares);
-    let t_share_com = utils::commit_poly(pp, &t_share_poly);
+    let t_share_com = KZG10::commit_g1(pp, &t_share_poly);
 
     // Make sure t_com is hiding as well
     let hiding_t_com = t_share_com + alpha2_vanish_poly_share_com;
@@ -648,15 +648,15 @@ async fn compute_permutation_argument(
     // Commit to q(X) - with all the extra terms from the hiding polynomials
     // q'(x) = q(x) - alpha1 * alpha2 * (x^PERM_SIZE - 1) + alpha2 * h(x) - alpha1 * t(x/w) - alpha2 * g(x)
 
-    let q_share_com = utils::commit_poly(pp, &q_share_poly);
+    let q_share_com = KZG10::commit_g1(pp, &q_share_poly);
     
     // Computing alpha1 * alpha2 * (x^PERM_SIZE - 1)
     let h_alpha1_alpha2 = evaluator.mult(&alpha1, &alpha2).await;
-    let alpha1_alpha2_vanish_poly_share_com = utils::commit_poly(pp, &vanishing_poly).mul(evaluator.get_wire(&h_alpha1_alpha2));
+    let alpha1_alpha2_vanish_poly_share_com = KZG10::commit_g1(pp, &vanishing_poly).mul(evaluator.get_wire(&h_alpha1_alpha2));
     
     // Computing alpha2 * h(x)
     let alpha2_h_share_poly = h_poly.mul(evaluator.get_wire(&alpha2));
-    let alpha2_h_share_poly_com = utils::commit_poly(pp, &alpha2_h_share_poly);
+    let alpha2_h_share_poly_com = KZG10::commit_g1(pp, &alpha2_h_share_poly);
 
     // Computing alpha1 * t(x/w)
     // First batch mult t_is with alpha1
@@ -677,7 +677,7 @@ async fn compute_permutation_argument(
     let alpha1_t_share_poly = utils::interpolate_poly_over_mult_subgroup(&alpha1_t_is);
     let alpha1_t_by_w_share_poly = utils::poly_domain_div_ω(&alpha1_t_share_poly, &ω);
 
-    let alpha1_t_by_w_share_poly_com = utils::commit_poly(pp, &alpha1_t_by_w_share_poly);
+    let alpha1_t_by_w_share_poly_com = KZG10::commit_g1(pp, &alpha1_t_by_w_share_poly);
 
     // Computing alpha2 * g(x)
     let h_alpha2_g_is = evaluator.batch_mult(
@@ -692,7 +692,7 @@ async fn compute_permutation_argument(
 
     // Compute alpha2 * g(x)
     let alpha2_g_share_poly = utils::interpolate_poly_over_mult_subgroup(&alpha2_g_is);
-    let alpha2_g_share_poly_com = utils::commit_poly(pp, &alpha2_g_share_poly);
+    let alpha2_g_share_poly_com = KZG10::commit_g1(pp, &alpha2_g_share_poly);
 
     let hiding_q_share_com = 
         q_share_com
@@ -776,7 +776,7 @@ async fn compute_permutation_argument(
             &(&divisor).into(),
         ).unwrap();
 
-    let pi_poly = utils::commit_poly(pp, &quotient);
+    let pi_poly = KZG10::commit_g1(pp, &quotient);
     let pi_1 = pi_s[0].clone() + pi_poly.mul(evaluator.get_wire(&alpha2));
 
     // pi_2
@@ -788,7 +788,7 @@ async fn compute_permutation_argument(
                 &(&divisor).into(),
             ).unwrap();
     
-    let pi_poly = utils::commit_poly(pp, &quotient);
+    let pi_poly = KZG10::commit_g1(pp, &quotient);
     let pi_2 = pi_s[1].clone() + pi_poly.mul(evaluator.get_wire(&alpha2));
 
     // pi_3
@@ -800,7 +800,7 @@ async fn compute_permutation_argument(
                 &(&divisor).into(),
             ).unwrap();
         
-    let pi_poly = utils::commit_poly(pp, &quotient);
+    let pi_poly = KZG10::commit_g1(pp, &quotient);
     let pi_3 = pi_s[2].clone() + pi_poly.mul(evaluator.get_wire(&alpha2));
 
     // pi_4
@@ -812,7 +812,7 @@ async fn compute_permutation_argument(
                 &(&divisor).into(),
             ).unwrap();
 
-    let pi_poly = utils::commit_poly(pp, &quotient);
+    let pi_poly = KZG10::commit_g1(pp, &quotient);
     let pi_4 = pi_s[3].clone() + pi_poly.mul(evaluator.get_wire(&alpha1));
 
     // pi_5
@@ -824,7 +824,7 @@ async fn compute_permutation_argument(
                 &(&divisor).into(),
             ).unwrap();
     
-    let pi_poly_1 = utils::commit_poly(pp, &quotient_1);
+    let pi_poly_1 = KZG10::commit_g1(pp, &quotient_1);
     let mut pi_5 = pi_s[4].clone() - pi_poly_1.mul(evaluator.get_wire(&h_alpha1_alpha2));
 
     let (quotient_2, _) = 
@@ -833,7 +833,7 @@ async fn compute_permutation_argument(
                 &(&divisor).into(),
             ).unwrap();
 
-    let pi_poly_2 = utils::commit_poly(pp, &quotient_2);
+    let pi_poly_2 = KZG10::commit_g1(pp, &quotient_2);
     pi_5 = pi_5 + pi_poly_2;
 
     let (quotient_3, _) = 
@@ -842,7 +842,7 @@ async fn compute_permutation_argument(
                 &(&divisor).into(),
             ).unwrap();
     
-    let pi_poly_3 = utils::commit_poly(pp, &quotient_3);
+    let pi_poly_3 = KZG10::commit_g1(pp, &quotient_3);
     pi_5 = pi_5 - pi_poly_3;
 
     let (quotient_4, _) = 
@@ -851,7 +851,7 @@ async fn compute_permutation_argument(
                 &(&divisor).into(),
             ).unwrap();
 
-    let pi_poly_4 = utils::commit_poly(pp, &quotient_4);
+    let pi_poly_4 = KZG10::commit_g1(pp, &quotient_4);
     pi_5 = pi_5 - pi_poly_4;
 
     let pi_is = evaluator.batch_add_g1_elements_from_all_parties(
@@ -893,7 +893,7 @@ async fn verify_permutation_argument(
         .collect();
 
     let v = utils::interpolate_poly_over_mult_subgroup(&v_evals);
-    let v_com = utils::commit_poly(pp, &v);
+    let v_com = KZG10::commit_g1(pp, &v);
 
     // Compute hash1 and hash2
     let mut v_bytes = Vec::new();
@@ -909,7 +909,7 @@ async fn verify_permutation_argument(
 
     // Compute g_com from f_com
     let const_y1 = DensePolynomial::from_coefficients_vec(vec![hash1]);
-    let const_com_y1 = utils::commit_poly(pp, &const_y1);
+    let const_com_y1 = KZG10::commit_g1(pp, &const_y1);
 
     let g_com = perm_proof.f_com.clone() + const_com_y1;
 
@@ -1188,7 +1188,7 @@ async fn new_encrypt_and_prove(
                 &(&divisor).into(),
             ).unwrap();
 
-    let pi_poly = utils::commit_poly(pp, &quotient);
+    let pi_poly = KZG10::commit_g1(pp, &quotient);
     let pi_share = pi_orig.clone() + pi_poly.mul(evaluator.get_wire(&alpha1)); 
 
     let pi = evaluator.add_g1_elements_from_all_parties(&pi_share, &String::from("new_enc_prove_pi")).await;
@@ -1833,12 +1833,12 @@ pub fn test_local_kzg() {
             &(&divisor).into(),
         ).unwrap();
 
-    let pi_poly = utils::commit_poly(&pp, &quotient);
-    let com = utils::commit_poly(&pp, &poly);
+    let pi_poly = KZG10::commit_g1(&pp, &quotient);
+    let com = KZG10::commit_g1(&pp, &poly);
 
     let poly_eval = poly.evaluate(&point);
 
-    let b = utils::kzg_check(&pp, &com, &point, &poly_eval, &pi_poly);
+    let b = utils::kzg_check(&pp, &com.into(), &point, &poly_eval, &pi_poly.into());
 
     assert!(b == true, "Verification failed");
 }
@@ -1861,8 +1861,8 @@ pub async fn test_dist_kzg(evaluator: &mut Evaluator) {
     // let actual_evaluation_at_w = evaluator.share_poly_eval(actual_poly.clone(), utils::multiplicative_subgroup_of_size(64)).await;
 
     let poly = utils::interpolate_poly_over_mult_subgroup(&evals);
-    let com_share = utils::commit_poly(&pp, &poly);
-    let com = evaluator.add_g1_elements_from_all_parties(&com_share, &String::from("kzg_test_com")).await;
+    let com_share = KZG10::commit_g1(&pp, &poly);
+    let com = evaluator.add_g1_elements_from_all_parties(&com_share.into(), &String::from("kzg_test_com")).await;
 
     let w = utils::multiplicative_subgroup_of_size(PERM_SIZE as u64);
     let pi_share = evaluator.eval_proof_with_share_poly(&pp, poly.clone(), w).await;
