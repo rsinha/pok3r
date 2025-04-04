@@ -5,15 +5,12 @@ use ark_poly::DenseUVPolynomial;
 use ark_poly::univariate::DenseOrSparsePolynomial;
 use ark_poly::univariate::DensePolynomial;
 use ark_std::UniformRand;
-use ark_ff::{Field, /* FftField */ };
-use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
+use ark_ff::Field;
 use ark_ec::{pairing::Pairing, AffineRepr};
 use ark_std::{Zero, One};
 use std::collections::HashMap;
 use std::ops::*;
 use futures::{prelude::*, channel::*};
-use ark_std::io::Cursor;
-//use rand::{rngs::StdRng, SeedableRng};
 use sha2::{Sha256, Digest};
 use num_bigint::BigUint;
 use rand::{rngs::StdRng, SeedableRng};
@@ -22,6 +19,7 @@ use crate::address_book::*;
 use crate::common::*;
 use crate::kzg::*;
 use crate::utils;
+use crate::encoding::*;
 
 pub type Curve = ark_bls12_377::Bls12_377;
 type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
@@ -691,6 +689,7 @@ impl Evaluator {
         ).await
     }
 
+    /// reveals the value of g^[x] for the given wire handles, and adds them up
     pub async fn batch_output_wire_in_exponent(&mut self, wire_handles: &[String]) -> Vec<G1> {
         let mut my_share_exps = Vec::new();
         let g = G1::generator();
@@ -1495,52 +1494,6 @@ impl Evaluator {
     }
 
 }
-
-
-fn encode_f_as_bs58_str(value: &F) -> String {
-    let mut buffer: Vec<u8> = Vec::new();
-    value.serialize_compressed(&mut buffer).unwrap();
-    bs58::encode(buffer).into_string()
-}
-
-fn decode_bs58_str_as_f(msg: &String) -> F {
-    let buf: Vec<u8> = bs58::decode(msg).into_vec().unwrap();
-    F::deserialize_compressed(buf.as_slice()).unwrap()
-}
-
-fn encode_g1_as_bs58_str(value: &G1) -> String {
-    let mut serialized_msg: Vec<u8> = Vec::new();
-    value.serialize_compressed(&mut serialized_msg).unwrap();
-    bs58::encode(serialized_msg).into_string()
-}
-
-fn decode_bs58_str_as_g1(msg: &String) -> G1 {
-    let decoded = bs58::decode(msg).into_vec().unwrap();
-    G1::deserialize_compressed(&mut Cursor::new(decoded)).unwrap()
-}
-
-fn encode_g2_as_bs58_str(value: &G2) -> String {
-    let mut serialized_msg: Vec<u8> = Vec::new();
-    value.serialize_compressed(&mut serialized_msg).unwrap();
-    bs58::encode(serialized_msg).into_string()
-}
-
-fn decode_bs58_str_as_g2(msg: &String) -> G2 {
-    let decoded = bs58::decode(msg).into_vec().unwrap();
-    G2::deserialize_compressed(&mut Cursor::new(decoded)).unwrap()
-}
-
-fn encode_gt_as_bs58_str(value: &Gt) -> String {
-    let mut serialized_msg: Vec<u8> = Vec::new();
-    value.serialize_compressed(&mut serialized_msg).unwrap();
-    bs58::encode(serialized_msg).into_string()
-}
-
-fn decode_bs58_str_as_gt(msg: &String) -> Gt {
-    let decoded = bs58::decode(msg).into_vec().unwrap();
-    Gt::deserialize_compressed(&mut Cursor::new(decoded)).unwrap()
-}
-
 
 
 pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
