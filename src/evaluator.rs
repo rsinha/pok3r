@@ -1,12 +1,9 @@
 
-use ark_bls12_377::{ G1Projective, G2Projective };
-use ark_ec::{Group, pairing::*};
 use ark_poly::DenseUVPolynomial;
 use ark_poly::univariate::DenseOrSparsePolynomial;
 use ark_poly::univariate::DensePolynomial;
 use ark_std::UniformRand;
-use ark_ff::Field;
-use ark_ec::{pairing::Pairing, AffineRepr};
+use ark_ec::{Group, pairing::Pairing, AffineRepr};
 use ark_std::{Zero, One};
 use std::collections::HashMap;
 use std::ops::*;
@@ -21,12 +18,7 @@ use crate::kzg::*;
 use crate::utils;
 use crate::encoding::*;
 
-pub type Curve = ark_bls12_377::Bls12_377;
-type KZG = KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
-pub type F = ark_bls12_377::Fr;
-pub type Gt = PairingOutput<Curve>;
-pub type G1 = G1Projective;
-pub type G2 = G2Projective;
+type KZG = crate::KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 
 macro_rules! send_over_network {
     ($msg:expr, $tx:expr) => {
@@ -93,21 +85,6 @@ impl Evaluator {
         }
     }
 
-    pub async fn test_networking(&mut self) {
-        let greeting = EvalNetMsg::Greeting { message: format!("Hello from {}", self.id) };
-        send_over_network!(greeting, self.tx);
-
-        //we expect greetings from all other players
-        let num_other_parties = self.addr_book.len() - 1;
-        for _ in 0..num_other_parties {
-            let msg: EvalNetMsg = self.rx.select_next_some().await;
-            match msg {
-                EvalNetMsg::Greeting { message } => { println!("evaluator received: {:?}", message); },
-                _ => continue,
-            }
-        }
-    }
-
     fn compute_fresh_wire_label(&mut self) -> String {
         self.gate_counter += 1;
 
@@ -120,11 +97,6 @@ impl Evaluator {
         let hash = hasher.finalize();
     
         bs58::encode(hash).into_string()
-    }
-
-    /// Return the number of beaver triples consumed
-    pub fn get_beaver_counter(&self) -> u64 {
-        self.beaver_counter
     }
     
 
@@ -139,7 +111,7 @@ impl Evaluator {
     }
 
     /// returns shares of a random element in {1, ω, ..., ω^63}
-    pub async fn ran_64(&mut self, h_a: &String) -> String {
+    pub async fn _ran_64(&mut self, h_a: &String) -> String {
         let h_c =  self.compute_fresh_wire_label();
 
         let h_a_exp_64 = self.exp(h_a).await;
@@ -1146,31 +1118,6 @@ impl Evaluator {
         self.wire_shares.get(handle).unwrap().clone()
     }
 
-    pub async fn eval_proof(&mut self, pp: &UniversalParams<Curve>, f_handles: Vec<String>, z: F, f_name: String) -> G1 {
-        // get shares
-        let f_shares = f_handles
-            .iter()
-            .map(|h| self.get_wire(h))
-            .collect::<Vec<F>>();
-
-        // Compute f_polynomial
-        let f_poly = utils::interpolate_poly_over_mult_subgroup(&f_shares);
-
-        let divisor = DensePolynomial::from_coefficients_vec(vec![F::from(1), -z]);
-
-        // Divide by (X-z)
-        let (quotient, _remainder) = 
-            DenseOrSparsePolynomial::divide_with_q_and_r(
-                &(&f_poly).into(),
-                &(&divisor).into(),
-            ).unwrap();
-
-        let pi_poly = KZG::commit_g1(pp, &quotient);
-        let pi = self.add_g1_elements_from_all_parties(&pi_poly.into(), &f_name).await;
-
-        pi
-    }
-
     pub async fn eval_proof_with_share_poly(&mut self, pp: &UniversalParams<Curve>, share_poly: DensePolynomial<F>, z: F) -> G1 {
         // Compute f_polynomial
         let f_poly = share_poly;
@@ -1184,10 +1131,7 @@ impl Evaluator {
                 &(&divisor).into(),
             ).unwrap();
 
-        let pi_poly = KZG::commit_g1(pp, &quotient);
-        // let pi = self.add_g1_elements_from_all_parties(&pi_poly, &f_name).await;
-
-        pi_poly.into()
+        KZG::commit_g1(pp, &quotient).into()
     }
 
     pub async fn batch_eval_proof_with_share_poly(
@@ -1254,7 +1198,7 @@ impl Evaluator {
         (c1, c2)
     }
 
-    pub async fn batch_dist_ibe_encrypt(
+    pub async fn _batch_dist_ibe_encrypt(
         &mut self, 
         msg_share_handles: &[String], // [z1]
         mask_share_handles: &[String], // [r]
@@ -1412,15 +1356,6 @@ impl Evaluator {
             .insert(sender.clone(), value.clone());
     }
 
-    fn exists_in_wire_shares(&self, handles: Vec<String>) -> bool {
-        handles
-            .iter()
-            .map(|h| self.wire_shares.contains_key(h))
-            .collect::<Vec<bool>>()
-            .iter()
-            .all(|&b| b)
-    }
-
     async fn collect_messages_from_all_peers(
         &mut self, 
         identifier: &String
@@ -1463,8 +1398,8 @@ impl Evaluator {
 
 }
 
-
-pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
+/*
+pub async fn _perform_sanity_testing(evaluator: &mut Evaluator) {
     println!("-------------- Running some sanity tests -----------------");
 
     println!("testing beaver triples...");
@@ -1577,3 +1512,4 @@ pub async fn perform_sanity_testing(evaluator: &mut Evaluator) {
     let g = <Curve as Pairing>::G1Affine::generator().clone();
     assert_eq!(g_pow_r, g.mul(&r));
 }
+*/

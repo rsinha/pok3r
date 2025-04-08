@@ -1,5 +1,5 @@
 use std::{thread, collections::{HashMap, HashSet}, time::{Duration, Instant}, vec, ops::*};
-use ark_ec::{pairing::Pairing, Group};
+use ark_ec::{pairing::Pairing, CurveGroup, Group};
 use ark_ff::Field;
 use ark_poly::{ GeneralEvaluationDomain, EvaluationDomain, Polynomial, univariate::{DensePolynomial, DenseOrSparsePolynomial}, DenseUVPolynomial};
 use ark_serialize::CanonicalSerialize;
@@ -25,6 +25,8 @@ use evaluator::*;
 use common::*;
 
 pub const PERFORM_TESTING: bool = false;
+
+type KZG = crate::KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -199,7 +201,7 @@ async fn main() {
     });
 
     // KZG setup runs once
-    let pp = utils::setup_kzg(1024);
+    let pp = KZG::setup(1024, &mut StdRng::from_seed([42u8; 32]));
 
     // Actual protocol
     let (card_share_handles, card_shares) = shuffle_deck(&mut mpc).await;
@@ -783,44 +785,44 @@ fn verify_permutation_argument(
     let hash2 = utils::fs_hash(vec![&v_bytes, &f_bytes, &q_bytes, &t_bytes, &g_bytes], 1)[0];
     
     // Check all evaluation proofs
-    b = b & utils::kzg_check(
+    b = b & KZG::verify_opening_proof(
         pp,
-        &perm_proof.t_com,
+        &perm_proof.t_com.into_affine(),
         &w63,
         &perm_proof.y1,
-        &perm_proof.pi_1
+        &perm_proof.pi_1.into_affine()
     );
 
-    b = b & utils::kzg_check(
+    b = b & KZG::verify_opening_proof(
         pp,
-        &perm_proof.t_com,
+        &perm_proof.t_com.into_affine(),
         &hash2,
         &perm_proof.y2,
-        &perm_proof.pi_2
+        &perm_proof.pi_2.into_affine()
     );
 
-    b = b & utils::kzg_check(
+    b = b & KZG::verify_opening_proof(
         pp,
-        &perm_proof.t_com,
+        &perm_proof.t_com.into_affine(),
         &(hash2 / w),
         &perm_proof.y3,
-        &perm_proof.pi_3
+        &perm_proof.pi_3.into_affine()
     );
 
-    b = b & utils::kzg_check(
+    b = b & KZG::verify_opening_proof(
         pp,
-        &g_com,
+        &g_com.into_affine(),
         &(hash2),
         &perm_proof.y4,
-        &perm_proof.pi_4
+        &perm_proof.pi_4.into_affine()
     );
 
-    b = b & utils::kzg_check(
+    b = b & KZG::verify_opening_proof(
         pp,
-        &perm_proof.q_com,
+        &perm_proof.q_com.into_affine(),
         &hash2,
         &perm_proof.y5,
-        &perm_proof.pi_5
+        &perm_proof.pi_5.into_affine()
     );
 
     // Check 0 : b = 1
@@ -1059,12 +1061,12 @@ async fn local_verify_encryption_proof(
     let delta = utils::fs_hash(vec![&bytes], 1)[0];
 
     // Check evaluation proof
-    if ! utils::kzg_check(
+    if ! KZG::verify_opening_proof(
         pp,
-        &proof.card_commitment,
+        &proof.card_commitment.into_affine(),
         &delta,
         &proof.card_poly_eval,
-        &proof.eval_proof
+        &proof.eval_proof.into_affine()
     ) {
         b = false;
     }

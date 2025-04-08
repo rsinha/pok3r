@@ -1,12 +1,16 @@
 use num_bigint::BigUint;
 use serde::{Serialize, Deserialize};
-use crate::evaluator::*;
 
 pub const PERM_SIZE: usize = 64;
 pub const DECK_SIZE: usize = 52;
 pub const LOG_PERM_SIZE: usize = 6;
 pub const NUM_SAMPLES: usize = 400;
 
+pub type Curve = ark_bls12_377::Bls12_377;
+pub type F = ark_bls12_377::Fr;
+pub type Gt = ark_ec::pairing::PairingOutput<Curve>;
+pub type G1 = ark_bls12_377::G1Projective;
+pub type G2 = ark_bls12_377::G2Projective;
 
 /// EvalNetMsg represents the types of messages that
 /// we expect to flow between the evaluator and networkd

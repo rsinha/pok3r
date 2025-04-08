@@ -1,5 +1,7 @@
 use std::{fmt, collections::HashMap};
 
+pub type Pok3rPeerId = String;
+
 pub struct Pok3rPeer {
     // base58 encoding of ed25519 pub key
     pub peer_id: Pok3rPeerId,
@@ -13,8 +15,6 @@ impl fmt::Display for Pok3rPeer {
     }
 }
 
-pub type Pok3rPeerId = String;
-
 pub type Pok3rAddrBook = HashMap<Pok3rPeerId, Pok3rPeer>;
 
 pub fn get_node_id_via_peer_id(
@@ -25,12 +25,3 @@ pub fn get_node_id_via_peer_id(
         None => None
     }
 }
-
-// pub fn get_peer_id_via_node_id(addr_book: &Pok3rAddrBook, node_id: u64) -> Option<Pok3rPeerId> {
-//     for (id, peer) in addr_book.iter() {
-//         if peer.node_id == node_id {
-//             return Some(id.clone());
-//         }
-//     }
-//     return None;
-// }

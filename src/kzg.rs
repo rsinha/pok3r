@@ -69,8 +69,8 @@ where
     pub fn verify_opening_proof(
         params: &UniversalParams<E>,
         comm: &E::G1Affine,
-        point: E::ScalarField,
-        value: E::ScalarField,
+        point: &E::ScalarField,
+        value: &E::ScalarField,
         proof: &E::G1Affine,
     ) -> bool {
         let g = params.powers_of_g[0];

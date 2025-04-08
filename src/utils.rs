@@ -28,13 +28,7 @@ use ark_ff::{
 use num_bigint::{BigInt, BigUint, Sign};
 
 use crate::kzg::UniversalParams;
-
-type Curve = ark_bls12_377::Bls12_377;
-type KZG = crate::kzg::KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
-type F = ark_bls12_377::Fr;
-type G1Affine = <Curve as Pairing>::G1Affine;
-type G2Affine = <Curve as Pairing>::G2Affine;
-type G1Config = ark_ec::short_weierstrass::Affine<ark_bls12_377::g1::Config>;
+use crate::common::*;
 
 
 macro_rules! requires_power_of_2 {
@@ -91,18 +85,6 @@ pub fn interpolate_poly_over_mult_subgroup(v: &Vec<F>) -> DensePolynomial<F> {
     let domain = GeneralEvaluationDomain::<F>::new(n).unwrap();
     let eval_form = Evaluations::from_vec_and_domain(evals, domain);
     eval_form.interpolate()
-}
-
-// Generate setup with fixed seed to make sure all parties use the same KZG params
-pub fn setup_kzg(n: usize) -> UniversalParams<Curve> {
-    let mut seeded_rng = StdRng::from_seed([42u8; 32]);
-    let params = KZG::setup(n, &mut seeded_rng);
-    params
-}
-
-pub fn kzg_check(pp: &UniversalParams<Curve>, comm: &G1, x: &F, eval: &F, proof: &G1) -> bool {
-    let b = KZG::verify_opening_proof(pp, &comm.into_affine(), *x, *eval, &proof.into_affine());
-    b
 }
 
 pub fn compute_additive_shares(value: &F, num_shares: usize) -> Vec<F> {

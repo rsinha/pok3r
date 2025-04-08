@@ -1,11 +1,7 @@
 use ark_serialize::{CanonicalSerialize, CanonicalDeserialize};
 use ark_std::io::Cursor;
 
-pub type Curve = ark_bls12_377::Bls12_377;
-pub type F = ark_bls12_377::Fr;
-pub type Gt = ark_ec::pairing::PairingOutput<Curve>;
-pub type G1 = ark_bls12_377::G1Projective;
-pub type G2 = ark_bls12_377::G2Projective;
+use crate::common::*;
 
 pub fn encode_f_as_bs58_str(value: &F) -> String {
     let mut buffer: Vec<u8> = Vec::new();
