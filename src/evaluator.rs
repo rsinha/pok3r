@@ -1,4 +1,3 @@
-
 use ark_poly::DenseUVPolynomial;
 use ark_poly::univariate::DenseOrSparsePolynomial;
 use ark_poly::univariate::DensePolynomial;
@@ -18,7 +17,7 @@ use crate::kzg::*;
 use crate::utils;
 use crate::encoding::*;
 
-type KZG = crate::KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
+type KZG = crate::kzg::KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 
 macro_rules! send_over_network {
     ($msg:expr, $tx:expr) => {
