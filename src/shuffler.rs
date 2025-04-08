@@ -781,7 +781,6 @@ pub async fn encrypt_and_prove(
         sigma_proof: Some(SigmaProof{
             a1: a1,
             a2: a2,
-            eta: eta[0],
             y: y
         })
     }

@@ -63,6 +63,5 @@ pub struct EncryptProof {
 pub struct SigmaProof {
     pub a1: G2,
     pub a2: Gt,
-    pub eta: F,
     pub y: F,
 }
