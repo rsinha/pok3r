@@ -48,13 +48,12 @@ pub fn compute_decryption_cache() -> Vec<Gt> {
     cache
 }
 
-pub async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
+pub async fn shuffle_deck(evaluator: &mut Evaluator) -> Vec<String> {
     //step 1: parties invoke F_RAN to obtain [sk]
     let sk = evaluator.ran();
 
     //stores (handle, wire value) pairs
     let mut card_share_handles = Vec::new();
-    let mut card_share_values = Vec::new();
     //stores set of card prfs encountered
     let mut prfs = HashSet::new();
 
@@ -82,7 +81,6 @@ pub async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
         prfs.insert(y_is[i].clone());
         let handle = evaluator.fixed_wire_handle(powers_of_ω[i + DECK_SIZE]);
         card_share_handles.push(handle.clone());
-        card_share_values.push(evaluator.get_wire(&handle));
     }
 
     // collect NUM_SAMPLES worth of random cards
@@ -101,7 +99,6 @@ pub async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
         if ! prfs.contains(&y_is[i]) {
             prfs.insert(y_is[i].clone());
             card_share_handles.push(c_is[i].clone());
-            card_share_values.push(evaluator.get_wire(&c_is[i]));
         }
     }
 
@@ -109,14 +106,13 @@ pub async fn shuffle_deck(evaluator: &mut Evaluator) -> (Vec<String>, Vec<F>) {
     assert_eq!(card_share_handles.len(), PERM_SIZE, 
         "We don't have enough cards - try again");
 
-    return (card_share_handles.clone(), card_share_values);
+    return card_share_handles.clone();
 }
 
 pub async fn compute_permutation_argument(
     pp: &UniversalParams<Curve>,
     evaluator: &mut Evaluator,
-    card_share_handles: Vec<String>,
-    card_share_values: &Vec<F>,
+    card_share_handles: &Vec<String>,
 ) -> (PermutationProof, String) {
 
     // Compute r_i and r_i^-1
@@ -135,8 +131,12 @@ pub async fn compute_permutation_argument(
 
     // 8: Interpret the vector fi as evaluations of a polynomial f(X).
     let f_name = String::from("perm_f");
+    let card_share_values = card_share_handles
+        .iter()
+        .map(|x| evaluator.get_wire(x))
+        .collect::<Vec<F>>();
     let f_share = 
-        utils::interpolate_poly_over_mult_subgroup(card_share_values);
+        utils::interpolate_poly_over_mult_subgroup(&card_share_values);
     let f_share_com = KZG10::commit_g1(pp, &f_share);
 
     // Commit to hiding polynomials [alpha1,alpha2]*(x^PERM_SIZE - 1)
