@@ -25,16 +25,6 @@ pub enum EvalNetMsg {
         handles: Vec<String>,
         values: Vec<String>
     },
-    SendTriple { 
-        sender: String, 
-        receiver: String, 
-        handle_a: String, 
-        share_a: String,
-        handle_b: String,
-        share_b: String,
-        handle_c: String,
-        share_c: String,
-    },
 }
 
 /// PermutationProof is a structure for the permutation proofs

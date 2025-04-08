@@ -595,6 +595,7 @@ impl Evaluator {
         output
     }
 
+    /// performs reconstruction on a wire
     pub async fn output_wire(&mut self, wire_handle: &String) -> F {
         let my_share = self.get_wire(wire_handle);
 
@@ -1366,39 +1367,6 @@ impl Evaluator {
     //returns the handle which 
     fn process_next_message(&mut self, msg: &EvalNetMsg) {
         match msg {
-            EvalNetMsg::SendTriple { 
-                sender: _sender,
-                receiver,
-                handle_a,
-                share_a,
-                handle_b,
-                share_b,
-                handle_c, 
-                share_c 
-            } => {
-                // if wrong receiver, then ignore -- TODO: remove after encryption
-                let match_on_receiver = receiver.eq(&self.id);
-                if ! match_on_receiver { return; }
-
-                // if already exists, then ignore
-                if self.exists_in_wire_shares(
-                    vec![
-                        handle_a.clone(), 
-                        handle_b.clone(), 
-                        handle_c.clone()
-                        ]) {
-                    return;
-                }
-
-                // insert the received values
-                let a_i = decode_bs58_str_as_f(share_a);
-                let b_i = decode_bs58_str_as_f(share_b);
-                let c_i = decode_bs58_str_as_f(share_c);
-                // store what we received
-                self.wire_shares.insert(handle_a.clone(), a_i);
-                self.wire_shares.insert(handle_b.clone(), b_i);
-                self.wire_shares.insert(handle_c.clone(), c_i);
-            },
             EvalNetMsg::PublishValue { 
                 sender,
                 handle,

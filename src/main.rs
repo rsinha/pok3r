@@ -934,6 +934,7 @@ async fn encrypt_and_prove(
         delta
     ).await;
 
+    // divisor(x) = x - delta for the KZG opening proof
     let divisor = 
         DensePolynomial::from_coefficients_vec(vec![-delta, F::from(1)]);
     let (quotient, _) = 
@@ -945,6 +946,7 @@ async fn encrypt_and_prove(
     let pi_poly = KZG10::commit_g1(pp, &quotient);
     let pi_share = pi_orig.clone() + pi_poly.mul(evaluator.get_wire(&alpha1)); 
 
+    // reconstruct the quotient polynomial
     let pi = evaluator.add_g1_elements_from_all_parties(&pi_share, &String::from("new_enc_prove_pi")).await;
 
     // Batch the pairing bases
@@ -961,14 +963,12 @@ async fn encrypt_and_prove(
         let x_f = F::from(ids[i].clone());
         let hash_id = G1::generator().mul(x_f);
         batch_h = batch_h.add(hash_id.mul(lagrange_delta[i]));
-
-        // Add the contribution from the hiding term (multiplied with (delta^PERM_SIZE - 1))
-        if i == PERM_SIZE-1 {
-            let x_f = F::from(BigUint::from(123 as u64));
-            let hash_id = G1::generator().mul(x_f);
-            batch_h = batch_h.add(hash_id.mul(utils::compute_power(&delta, PERM_SIZE as u64) - F::from(1)))
-        }
     }
+    // Add the contribution from the hiding term (multiplied with (delta^PERM_SIZE - 1))
+    let x_f = F::from(BigUint::from(123 as u64));
+    let hash_id = G1::generator().mul(x_f);
+    batch_h = batch_h.add(hash_id.mul(utils::compute_power(&delta, PERM_SIZE as u64) - F::from(1)));
+
     let e_batch = <Curve as Pairing>::pairing(batch_h, pk);
 
     // Compute t = e_batch^r
@@ -1081,26 +1081,20 @@ async fn local_verify_encryption_proof(
         let x_f = F::from(proof.ids[i].clone());
         let hash_id = G1::generator().mul(x_f);
         batch_h = batch_h.add(hash_id.mul(lagrange_delta[i]));
-
-        // Add the contribution from the hiding term (multiplied with (delta^PERM_SIZE - 1))
-        if i == PERM_SIZE-1 {
-            let x_f = F::from(BigUint::from(123 as u64));
-            let hash_id = G1::generator().mul(x_f);
-            batch_h = batch_h.add(hash_id.mul(utils::compute_power(&delta, PERM_SIZE as u64) - F::from(1)))
-        }
     }
+    // Add the contribution from the hiding term (multiplied with (delta^PERM_SIZE - 1))
+    let x_f = F::from(BigUint::from(123 as u64));
+    let hash_id = G1::generator().mul(x_f);
+    batch_h = batch_h.add(hash_id.mul(utils::compute_power(&delta, PERM_SIZE as u64) - F::from(1)));
+
     let e_batch = <Curve as Pairing>::pairing(batch_h, proof.pk);
 
     // Check that prod_i c2_i^Li(delta) * alpha1_c2*(delta*PERM_SIZE - 1) = g^f(delta) * t
     let mut lhs = Gt::zero();
     for i in 0..PERM_SIZE {
         lhs = lhs + proof.ciphertexts.1[i].mul(lagrange_delta[i]);
-
-        // Add hiding_ciphertext
-        if i == PERM_SIZE-1 {
-            lhs = lhs + proof.hiding_ciphertext.mul(utils::compute_power(&delta, PERM_SIZE as u64) - F::from(1));
-        }
     }
+    lhs = lhs + proof.hiding_ciphertext.mul(utils::compute_power(&delta, PERM_SIZE as u64) - F::from(1));
 
     let mut rhs = Gt::generator().mul(proof.card_poly_eval);
     rhs = rhs.add(proof.t);
