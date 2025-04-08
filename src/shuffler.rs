@@ -628,7 +628,7 @@ pub async fn encrypt_and_prove(
     alpha1: String,
     pk: G2,
     ids: Vec<BigUint>
-) -> EncryptProof {
+) -> (Ciphertext, EncryptionProof) {
     // Get all cards from card handles
     let mut cards = vec![];
     for h in card_handles.clone() {
@@ -769,32 +769,37 @@ pub async fn encrypt_and_prove(
     h_y = evaluator.add(&h_y, &z);
     let y = evaluator.output_wire(&h_y).await;
 
-    EncryptProof{
+    let sigma_proof = SigmaProof{
+        a1: a1,
+        a2: a2,
+        y: y
+    };
+
+    let encryption_proof = EncryptionProof{
         pk: pk,
         ids: ids,
         card_commitment: card_commitment,
         card_poly_eval: poly_eval,
         eval_proof: pi,
-        ciphertexts: (c1, c2s),
         hiding_ciphertext: alpha1_c2,
         t: t,
-        sigma_proof: Some(SigmaProof{
-            a1: a1,
-            a2: a2,
-            y: y
-        })
-    }
+        sigma_proof: Some(sigma_proof)
+    };
 
+    let ctxt = (c1, c2s);
+
+    (ctxt, encryption_proof)
 }
 
-pub async fn local_verify_encryption_proof(
+pub fn verify_encryption_argument(
     pp: &UniversalParams<Curve>,
-    proof: &EncryptProof,
+    ctxt: &Ciphertext,
+    proof: &EncryptionProof,
 ) -> bool {
     let mut b = true;
 
     // Common first element of all ciphertexts
-    let c1 = proof.ciphertexts.0.clone();
+    let c1 = ctxt.0.clone();
 
     // Compute delta
     let mut bytes = Vec::new();
@@ -805,7 +810,7 @@ pub async fn local_verify_encryption_proof(
     bytes.extend_from_slice(&c1_bytes);
 
     for i in 0..PERM_SIZE {
-        proof.ciphertexts.1[i].serialize_uncompressed(&mut c2_bytes).unwrap();
+        ctxt.1[i].serialize_uncompressed(&mut c2_bytes).unwrap();
         bytes.extend_from_slice(&c2_bytes);
     }
 
@@ -849,7 +854,7 @@ pub async fn local_verify_encryption_proof(
     // Check that prod_i c2_i^Li(delta) * alpha1_c2*(delta*PERM_SIZE - 1) = g^f(delta) * t
     let mut lhs = Gt::zero();
     for i in 0..PERM_SIZE {
-        lhs = lhs + proof.ciphertexts.1[i].mul(lagrange_delta[i]);
+        lhs = lhs + ctxt.1[i].mul(lagrange_delta[i]);
     }
     lhs = lhs + proof.hiding_ciphertext.mul(utils::compute_power(&delta, PERM_SIZE as u64) - F::from(1));
 
@@ -893,10 +898,10 @@ pub async fn local_verify_encryption_proof(
 pub fn decrypt_one_card(
     index: usize,
     decryption_key: &G1, // Should be sk * H(id)
-    proof: &EncryptProof,
+    ctxt: &Ciphertext,
     cache: &[Gt],
 ) -> Option<usize> {
-    let ciphertext = (proof.ciphertexts.0, proof.ciphertexts.1[index].clone());
+    let ciphertext = (ctxt.0, ctxt.1[index].clone());
 
     // IBE decryption to get g^mask
     let (c1, c2) = ciphertext;

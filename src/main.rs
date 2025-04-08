@@ -216,8 +216,7 @@ async fn main() {
         .collect::<Vec<BigUint>>();
 
     // Encrypt and prove
-    //let s_encrypt = Instant::now();
-    let encrypt_proof = encrypt_and_prove(
+    let (ctxt, encryption_proof) = encrypt_and_prove(
         &pp, 
         &mut mpc, 
         card_share_handles.clone(), 
@@ -235,11 +234,14 @@ async fn main() {
 
         // ignore the first (PERM_SIZE - DECK_SIZE) cards, which are not part of deck
         if i >= (PERM_SIZE - DECK_SIZE) {
-            let card = decrypt_one_card(i, &dec_key, &encrypt_proof, &cache).unwrap();
+            let card = decrypt_one_card(i, &dec_key, &ctxt, &cache).unwrap();
             decrypted_cards.push(card);
             print!("{},", card);
         }
     }
+    
+    assert!(verify_permutation_argument(&pp, &perm_proof), "Permutation argument verification failed");
+    assert!(verify_encryption_argument(&pp, &ctxt, &encryption_proof), "Encryption proof verification failed");
 
     // we can verify the proof, but let's also do a sanity check
     // check that decrypted cards is a permutation of 0..51
@@ -247,14 +249,6 @@ async fn main() {
     sorted_cards.sort_unstable();
     let expected_cards: Vec<usize> = (0..DECK_SIZE).collect();
     assert_eq!(sorted_cards, expected_cards, "Decrypted cards are not a valid permutation of 0..51");
-    
-    let verified = verify_permutation_argument(&pp, &perm_proof);
-    assert!(verified, "Permutation argument verification failed");
-
-
-    let verified = local_verify_encryption_proof(&pp, &encrypt_proof).await;
-    assert!(verified, "Encryption proof verification failed");
-
     println!("completed.");
 
     netd_handle.join().unwrap();
