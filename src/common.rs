@@ -53,7 +53,7 @@ pub type Ciphertext = (G2,Vec<Gt>);
 pub struct EncryptionProof {
     pub pk: G2,
     pub ids: Vec<BigUint>,
-    pub card_commitment: G1,
+    pub card_commitment: G1, //same as f_com above
     pub card_poly_eval: F,
     pub eval_proof: G1,
     pub hiding_ciphertext: Gt,

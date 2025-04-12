@@ -486,7 +486,7 @@ pub async fn compute_permutation_argument(
         &vec![String::from("pi_1"), String::from("pi_2"), String::from("pi_3"), String::from("pi_4"), String::from("pi_5")]
     ).await;
 
-    (PermutationProof {
+    let permutation_argument = PermutationProof {
         y1: evaluator.output_wire(&h_y1).await,
         y2: evaluator.output_wire(&h_y2).await,
         y3: evaluator.output_wire(&h_y3).await,
@@ -500,8 +500,9 @@ pub async fn compute_permutation_argument(
         f_com,
         q_com,
         t_com
-    },
-    alpha1)
+    };
+
+    (permutation_argument, alpha1)
 }
 
 pub fn verify_permutation_argument(
