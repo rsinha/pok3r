@@ -797,8 +797,6 @@ pub fn verify_encryption_argument(
     ctxt: &Ciphertext,
     proof: &EncryptionProof,
 ) -> bool {
-    let mut b = true;
-
     // Common first element of all ciphertexts
     let c1 = ctxt.0.clone();
 
@@ -829,7 +827,7 @@ pub fn verify_encryption_argument(
         &proof.card_poly_eval,
         &proof.eval_proof.into_affine()
     ) {
-        b = false;
+        return false;
     }
 
     // Compute e_batch
@@ -863,7 +861,7 @@ pub fn verify_encryption_argument(
     rhs = rhs.add(proof.t);
 
     if ! lhs.eq(&rhs) {
-        b = false;
+        return false;
     }
 
     // Check sigma proof
@@ -881,7 +879,7 @@ pub fn verify_encryption_argument(
     let rhs = c1.mul(eta[0]).add(proof.sigma_proof.as_ref().unwrap().a1);
 
     if ! lhs.eq(&rhs) {
-        b = false;
+        return false;
     }
 
     // Check statement 2
@@ -889,10 +887,10 @@ pub fn verify_encryption_argument(
     let rhs = proof.t.mul(eta[0]).add(proof.sigma_proof.as_ref().unwrap().a2);
 
     if ! lhs.eq(&rhs) {
-        b = false;
+        return false;
     }
 
-    b
+    true
 }
 
 /// Estimating time to decrypt one card at game time
