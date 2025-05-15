@@ -6,7 +6,7 @@ use ark_ec::{Group, pairing::Pairing, AffineRepr};
 use ark_std::{Zero, One};
 use std::collections::HashMap;
 use std::ops::*;
-use futures::{prelude::*, channel::*};
+//use futures::channel::*;
 use sha2::{Sha256, Digest};
 use num_bigint::BigUint;
 use rand::{rngs::StdRng, SeedableRng};
@@ -14,34 +14,18 @@ use rand::{rngs::StdRng, SeedableRng};
 use crate::address_book::*;
 use crate::common::*;
 use crate::kzg::*;
+use crate::network;
 use crate::utils;
 use crate::encoding::*;
 
 type KZG = crate::kzg::KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
 
-macro_rules! send_over_network {
-    ($msg:expr, $tx:expr) => {
-        let r = $tx.send($msg).await;
-        if let Err(err) = r {
-            eprint!("evaluator error {:?}", err);
-        }
-    };
-}
-
 
 pub struct Evaluator {
     /// local peer id
-    id: Pok3rPeerId,
-    /// information about all other peers
-    addr_book: Pok3rAddrBook,
-    /// sender channel towards the networkd
-    tx: mpsc::UnboundedSender<EvalNetMsg>,
-    /// receiver channel from the networkd
-    rx: mpsc::UnboundedReceiver<EvalNetMsg>,
+    messaging: network::MessagingSystem,
     /// stores the share associated with each wire
     wire_shares: HashMap<String, F>,
-    /// stores incoming messages indexed by identifier and then by peer id
-    mailbox: HashMap<String, HashMap<String, String>>,
     /// keep track of gates
     gate_counter: u64,
     /// keep track of the number of beaver triples consumed
@@ -50,35 +34,11 @@ pub struct Evaluator {
 
 impl Evaluator {
     pub async fn new(
-        id: &Pok3rPeerId,
-        addr_book: Pok3rAddrBook,
-        tx: mpsc::UnboundedSender<EvalNetMsg>, 
-        mut rx: mpsc::UnboundedReceiver<EvalNetMsg>
+        messaging: network::MessagingSystem
     ) -> Self {
-        // we expect the first message from the 
-        // networkd to be a connection established;
-        // so, here we will loop till we get that
-        loop {
-            //do a blocking recv on the rx channel
-            let msg: EvalNetMsg = rx.select_next_some().await;
-            match msg {
-                EvalNetMsg::ConnectionEstablished { success } => {
-                    if success {
-                        println!("evaluator connected to the network");
-                        break;
-                    }
-                },
-                _ => continue,
-            }
-        }
-
         Evaluator {
-            id: id.clone(), 
-            addr_book, 
-            tx, 
-            rx,
             wire_shares: HashMap::new(),
-            mailbox: HashMap::new(),
+            messaging,
             gate_counter: 0,
             beaver_counter: 0
         }
@@ -255,8 +215,7 @@ impl Evaluator {
 
         let x = self.get_wire(&handle_x);
 
-        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
-        let clear_add_share: F = match my_id {
+        let clear_add_share: F = match self.messaging.get_my_id() {
             0 => {x + y}
             _ => {x}
         };
@@ -306,8 +265,7 @@ impl Evaluator {
         let handle = self.compute_fresh_wire_label();
         
         //only one party should add the constant term
-        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
-        let share_x_mul_y: F = match my_id {
+        let share_x_mul_y: F = match self.messaging.get_my_id() {
             0 => {
                 x_plus_a * y_plus_b 
                 - x_plus_a * share_b 
@@ -357,14 +315,6 @@ impl Evaluator {
             y_plus_b_handles.push(handle_y_plus_b);
         }
 
-        // let x_plus_a_reconstructed = self
-        //     .batch_output_wire(&x_plus_a_handles)
-        //     .await;
-
-        // let y_plus_b_reconstructed = self
-        //     .batch_output_wire(&y_plus_b_handles)
-        //     .await;
-
         let mut batch_handles = vec![];
         batch_handles.extend_from_slice(&x_plus_a_handles);
         batch_handles.extend_from_slice(&y_plus_b_handles);
@@ -372,13 +322,13 @@ impl Evaluator {
         let x_plus_a_and_y_plus_b = self.batch_output_wire(&batch_handles).await;
 
         let mut output: Vec<String> = vec![];
-        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
+
         for i in 0..len {
             let x_plus_a_reconstructed = x_plus_a_and_y_plus_b[i];
             let y_plus_b_reconstructed = x_plus_a_and_y_plus_b[x_plus_a_handles.len() + i];
 
             //only one party should add the constant term
-            let share_x_mul_y: F = match my_id {
+            let share_x_mul_y: F = match self.messaging.get_my_id() {
                 0 => {
                     x_plus_a_reconstructed * y_plus_b_reconstructed 
                     - x_plus_a_reconstructed * bookkeeping_b[i] 
@@ -405,8 +355,7 @@ impl Evaluator {
     pub fn fixed_wire_handle(&mut self, value: F) -> String {
         let handle = self.compute_fresh_wire_label();
         
-        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
-        let share: F = match my_id {
+        let share: F = match self.messaging.get_my_id() {
             0 => value,
             _ => F::from(0)
         };
@@ -470,8 +419,8 @@ impl Evaluator {
         // Update beaver counter
         self.beaver_counter += 1;
 
-        let n: usize = self.addr_book.len();
-        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
+        let n: usize = self.messaging.addr_book.len();
+        let my_id = get_node_id_via_peer_id(&self.messaging.addr_book, &self.messaging.id).unwrap();
 
         let handle_a = self.compute_fresh_wire_label();
         let handle_b = self.compute_fresh_wire_label();
@@ -512,8 +461,8 @@ impl Evaluator {
         // Update beaver counter
         self.beaver_counter += num_beavers as u64;
 
-        let n: usize = self.addr_book.len();
-        let my_id = get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap();
+        let n: usize = self.messaging.addr_book.len();
+        let my_id = self.messaging.get_my_id();
 
         let mut seeded_rng = StdRng::from_seed([42u8; 32]);
 
@@ -570,14 +519,9 @@ impl Evaluator {
     pub async fn output_wire(&mut self, wire_handle: &String) -> F {
         let my_share = self.get_wire(wire_handle);
 
-        let msg = EvalNetMsg::PublishValue {
-            sender: self.id.clone(),
-            handle: wire_handle.clone(),
-            value: encode_f_as_bs58_str(&my_share),
-        };
-        send_over_network!(msg, self.tx);
+        self.messaging.send_to_all([wire_handle.clone()], [encode_f_as_bs58_str(&my_share)]).await;
 
-        let incoming_msgs = self.collect_messages_from_all_peers(wire_handle).await;
+        let incoming_msgs = self.messaging.recv_from_all(wire_handle).await;
         let incoming_values: Vec<F> = incoming_msgs
             .into_iter()
             .map(|x| decode_bs58_str_as_f(&x))
@@ -613,26 +557,16 @@ impl Evaluator {
                 let handles_bucket = &handles[processed_len..processed_len + this_iter_len].to_vec();
                 let values_bucket = &values[processed_len..processed_len + this_iter_len].to_vec();
 
-                let msg = EvalNetMsg::PublishBatchValue {
-                    sender: self.id.clone(),
-                    handles: handles_bucket.to_owned(),
-                    values: values_bucket.to_owned(),
-                };
-                send_over_network!(msg, self.tx);
+                self.messaging.send_to_all(handles_bucket, values_bucket).await;
 
                 processed_len += this_iter_len;
             }
         } else {
-            let msg = EvalNetMsg::PublishBatchValue {
-                sender: self.id.clone(),
-                handles: handles,
-                values: values,
-            };
-            send_over_network!(msg, self.tx);
+            self.messaging.send_to_all(handles, values).await;
         }
 
         for i in 0..len {
-            let incoming_msgs = self.collect_messages_from_all_peers(&wire_handles[i]).await;
+            let incoming_msgs = self.messaging.recv_from_all(&wire_handles[i]).await;
             let incoming_values: Vec<F> = incoming_msgs
                 .into_iter()
                 .map(|x| decode_bs58_str_as_f(&x))
@@ -682,15 +616,8 @@ impl Evaluator {
         &mut self, value: &G1, 
         identifier: &String
     ) -> G1 {
-
-        let msg = EvalNetMsg::PublishValue {
-            sender: self.id.clone(),
-            handle: identifier.clone(),
-            value: encode_g1_as_bs58_str(value),
-        };
-        send_over_network!(msg, self.tx);
-
-        let incoming_msgs = self.collect_messages_from_all_peers(identifier).await;
+        self.messaging.send_to_all([identifier.clone()], [encode_g1_as_bs58_str(value)]).await;
+        let incoming_msgs = self.messaging.recv_from_all(identifier).await;
 
         let incoming_values: Vec<G1> = incoming_msgs
             .into_iter()
@@ -724,28 +651,17 @@ impl Evaluator {
                 let this_iter_len = std::cmp::min(len - processed_len, 256);
                 let handles_bucket = &identifiers[processed_len..processed_len + this_iter_len].to_vec();
                 let values_bucket = &values[processed_len..processed_len + this_iter_len].to_vec();
-
-                let msg = EvalNetMsg::PublishBatchValue {
-                    sender: self.id.clone(),
-                    handles: handles_bucket.to_owned(),
-                    values: values_bucket.to_owned(),
-                };
-                send_over_network!(msg, self.tx);
+                self.messaging.send_to_all(handles_bucket.to_owned(), values_bucket.to_owned()).await;
 
                 processed_len += this_iter_len;
             }
         }
         else {
-            let msg = EvalNetMsg::PublishBatchValue {
-                sender: self.id.clone(),
-                handles: identifiers.into(),
-                values: values,
-            };
-            send_over_network!(msg, self.tx);
+            self.messaging.send_to_all(identifiers, values).await;
         }
 
         for i in 0..inputs.len() {
-            let incoming_msgs = self.collect_messages_from_all_peers(&identifiers[i]).await;
+            let incoming_msgs = self.messaging.recv_from_all(&identifiers[i]).await;
             let incoming_values: Vec<G1> = incoming_msgs
                 .into_iter()
                 .map(|x| decode_bs58_str_as_g1(&x))
@@ -765,15 +681,8 @@ impl Evaluator {
         &mut self, value: &G2, 
         identifier: &String
     ) -> G2 {
-
-        let msg = EvalNetMsg::PublishValue {
-            sender: self.id.clone(),
-            handle: identifier.clone(),
-            value: encode_g2_as_bs58_str(value),
-        };
-        send_over_network!(msg, self.tx);
-
-        let incoming_msgs = self.collect_messages_from_all_peers(identifier).await;
+        self.messaging.send_to_all([identifier.clone()], [encode_g2_as_bs58_str(value)]).await;
+        let incoming_msgs = self.messaging.recv_from_all(identifier).await;
 
         let incoming_values: Vec<G2> = incoming_msgs
             .into_iter()
@@ -809,27 +718,17 @@ impl Evaluator {
                 let handles_bucket = &identifiers[processed_len..processed_len + this_iter_len].to_vec();
                 let values_bucket = &values[processed_len..processed_len + this_iter_len].to_vec();
 
-                let msg = EvalNetMsg::PublishBatchValue {
-                    sender: self.id.clone(),
-                    handles: handles_bucket.to_owned(),
-                    values: values_bucket.to_owned(),
-                };
-                send_over_network!(msg, self.tx);
+                self.messaging.send_to_all(handles_bucket, values_bucket).await;
 
                 processed_len += this_iter_len;
             }
         }
         else {
-            let msg = EvalNetMsg::PublishBatchValue {
-                sender: self.id.clone(),
-                handles: identifiers.into(),
-                values: values,
-            };
-            send_over_network!(msg, self.tx);
+            self.messaging.send_to_all(identifiers, values).await;
         }
 
         for i in 0..inputs.len() {
-            let incoming_msgs = self.collect_messages_from_all_peers(&identifiers[i]).await;
+            let incoming_msgs = self.messaging.recv_from_all(&identifiers[i]).await;
             let incoming_values: Vec<G2> = incoming_msgs
                 .into_iter()
                 .map(|x| decode_bs58_str_as_g2(&x))
@@ -850,15 +749,9 @@ impl Evaluator {
         &mut self, value: &Gt, 
         identifier: &String
     ) -> Gt {
+        self.messaging.send_to_all([identifier.clone()], [encode_gt_as_bs58_str(value)]).await;
 
-        let msg = EvalNetMsg::PublishValue {
-            sender: self.id.clone(),
-            handle: identifier.clone(),
-            value: encode_gt_as_bs58_str(value),
-        };
-        send_over_network!(msg, self.tx);
-
-        let incoming_msgs = self.collect_messages_from_all_peers(identifier).await;
+        let incoming_msgs = self.messaging.recv_from_all(identifier).await;
 
         let incoming_values: Vec<Gt> = incoming_msgs
             .into_iter()
@@ -894,27 +787,17 @@ impl Evaluator {
                 let handles_bucket = &identifiers[processed_len..processed_len + this_iter_len].to_vec();
                 let values_bucket = &values[processed_len..processed_len + this_iter_len].to_vec();
 
-                let msg = EvalNetMsg::PublishBatchValue {
-                    sender: self.id.clone(),
-                    handles: handles_bucket.to_owned(),
-                    values: values_bucket.to_owned(),
-                };
-                send_over_network!(msg, self.tx);
+                self.messaging.send_to_all(handles_bucket, values_bucket).await;
 
                 processed_len += this_iter_len;
             }
         }
         else {
-            let msg = EvalNetMsg::PublishBatchValue {
-                sender: self.id.clone(),
-                handles: identifiers.into(),
-                values: values,
-            };
-            send_over_network!(msg, self.tx);
+            self.messaging.send_to_all(identifiers, values).await;
         }
 
         for i in 0..inputs.len() {
-            let incoming_msgs = self.collect_messages_from_all_peers(&identifiers[i]).await;
+            let incoming_msgs = self.messaging.recv_from_all(&identifiers[i]).await;
             let incoming_values: Vec<Gt> = incoming_msgs
                 .into_iter()
                 .map(|x| decode_bs58_str_as_gt(&x))
@@ -1307,208 +1190,4 @@ impl Evaluator {
         (c1, c2s)
     }
 
-    //returns the handle which 
-    fn process_next_message(&mut self, msg: &EvalNetMsg) {
-        match msg {
-            EvalNetMsg::PublishValue { 
-                sender,
-                handle,
-                value
-            } => {
-                self.accept_handle_and_value_from_sender(sender, handle, value);
-            },
-            EvalNetMsg::PublishBatchValue { 
-                sender,
-                handles,
-                values
-            } => {
-                assert_eq!(handles.len(), values.len());
-
-                for (h,v) in handles.iter().zip(values.iter()) {
-                    self.accept_handle_and_value_from_sender(sender, h, v);
-                }
-            },
-            _ => return,
-        }
-    }
-
-    fn accept_handle_and_value_from_sender(&mut self, 
-        sender: &String, 
-        handle: &String, 
-        value: &String
-    ) {
-        // if already exists, then ignore
-        if self.mailbox.contains_key(handle) {
-            let sender_exists_for_handle = self.mailbox
-                .get(handle)
-                .unwrap()
-                .contains_key(sender);
-            if sender_exists_for_handle { return; } //ignore duplicate msg!
-        } else {
-            //mailbox never got a message by this handle so lets make room for it
-            self.mailbox.insert(handle.clone(), HashMap::new());
-        }
-
-        self.mailbox
-            .get_mut(handle)
-            .unwrap()
-            .insert(sender.clone(), value.clone());
-    }
-
-    async fn collect_messages_from_all_peers(
-        &mut self, 
-        identifier: &String
-    ) -> Vec<String> {
-        let mut messages = vec![];
-        let peers: Vec<Pok3rPeerId> = self.addr_book.keys().cloned().collect();
-        for peer_id in peers {
-            if self.id.eq(&peer_id) { continue; }
-
-            loop { //loop over all incoming messages till we find msg from peer
-                if self.mailbox.contains_key(identifier) {
-                    let sender_exists_for_handle = self.mailbox
-                        .get(identifier)
-                        .unwrap()
-                        .contains_key(&peer_id);
-                     //if we already have it, break out!
-                    if sender_exists_for_handle { break; }
-                }
-
-                let msg: EvalNetMsg = self.rx.select_next_some().await;
-                self.process_next_message(&msg);
-            }
-
-            // if we got here, we can assume we have the message from peer_id
-            let msg = self.mailbox
-                .get(identifier)
-                .unwrap()
-                .get(&peer_id)
-                .unwrap()
-                .clone();
-            
-            messages.push(msg);
-        }
-
-        //clear the mailbox because we might want to use identifier again
-        self.mailbox.remove(identifier);
-
-        messages
-    }
-
 }
-
-/*
-pub async fn _perform_sanity_testing(evaluator: &mut Evaluator) {
-    println!("-------------- Running some sanity tests -----------------");
-
-    println!("testing beaver triples...");
-    let (h_a, h_b, h_c) = evaluator.beaver().await;
-    let a = evaluator.output_wire(&h_a).await;
-    let b = evaluator.output_wire(&h_b).await;
-    let c = evaluator.output_wire(&h_c).await;
-    assert_eq!(c, a * b);
-
-    println!("testing adder...");
-    let h_r1 = evaluator.ran();
-    let h_r2 = evaluator.ran();
-    let r1 = evaluator.output_wire(&h_r1).await;
-    let r2 = evaluator.output_wire(&h_r2).await;
-    let h_sum_r1_r2 = evaluator.add(&h_r1, &h_r2);
-    let sum_r1_r2 = evaluator.output_wire(&h_sum_r1_r2).await;
-    assert_eq!(sum_r1_r2, r1 + r2);
-
-    println!("testing batch output wire...");
-    let mut a_handles = Vec::new();
-    let mut b_handles = Vec::new();
-    let mut c_handles = Vec::new();
-
-    for _i in 0..5 {
-        let (h_a, h_b, h_c) = evaluator.beaver().await;
-
-        a_handles.push(h_a);
-        b_handles.push(h_b);
-        c_handles.push(h_c);
-    }
-    let reconstructed_a = evaluator.batch_output_wire(&a_handles).await;
-    let reconstructed_b = evaluator.batch_output_wire(&b_handles).await;
-    let reconstructed_c = evaluator.batch_output_wire(&c_handles).await;
-    for i in 0..5 {
-        let a = reconstructed_a.get(i).unwrap();
-        let b = reconstructed_b.get(i).unwrap();
-        let c = reconstructed_c.get(i).unwrap();
-
-        assert_eq!(*c, (*a) * (*b));
-    }
-
-
-    println!("testing multiplier...");
-    let h_mult_r1_r2 = evaluator.mult(&h_r1, &h_r2).await;
-    let mult_r1_r2 = evaluator.output_wire(&h_mult_r1_r2).await;
-    assert_eq!(mult_r1_r2, r1 * r2);
-
-    println!("testing batch multiplier...");
-    let mut xs_handles = Vec::new();
-    let mut ys_handles = Vec::new();
-    for _i in 0..5 {
-        let h_r1 = evaluator.ran();
-        let h_r2 = evaluator.ran();
-
-        xs_handles.push(h_r1);
-        ys_handles.push(h_r2);
-    }
-
-    let xs_mult_ys_handles = evaluator.batch_mult(
-        &xs_handles,
-        &ys_handles
-    ).await;
-
-    for i in 0..5 {
-        let x = evaluator.output_wire(&xs_handles[i]).await;
-        let y = evaluator.output_wire(&ys_handles[i]).await;
-        let xy = evaluator.output_wire(&xs_mult_ys_handles[i]).await;
-
-        assert_eq!(x * y, xy);
-    }
-
-
-    println!("testing inverter...");
-    let h_r3 = evaluator.ran();
-    let r3 = evaluator.output_wire(&h_r3).await;
-    let h_r3_inverted = evaluator.inv(&h_r3).await;
-    let r3_inverted = evaluator.output_wire(&h_r3_inverted).await;
-    assert_eq!(ark_bls12_377::Fr::from(1), r3 * r3_inverted);
-
-    println!("testing batch inverter...");
-    let xs_handles: Vec<String> = (0..5)
-            .into_iter()
-            .map(|_| evaluator.ran())
-            .collect();
-    let inv_xs_handles = evaluator.batch_inv(&xs_handles).await;
-    for i in 0..5 {
-        let x = evaluator.output_wire(&xs_handles[i]).await;
-        let inv_x = evaluator.output_wire(&inv_xs_handles[i]).await;
-        assert_eq!(ark_bls12_377::Fr::from(1), x * inv_x);
-    }
-
-    println!("testing exponentiator...");
-    let h_r = evaluator.ran();
-    let r = evaluator.output_wire(&h_r).await;
-    let h_r_exp_64 = evaluator.exp(&h_r).await;
-    let r_exp_64 = evaluator.output_wire(&h_r_exp_64).await;
-    assert_eq!(r.pow([64]), r_exp_64);
-
-    println!("testing scale...");
-    let h_r = evaluator.ran();
-    let r = evaluator.output_wire(&h_r).await;
-    let h_r_scaled = evaluator.scale(&h_r, F::from(42));
-    let r_scaled = evaluator.output_wire(&h_r_scaled).await;
-    assert_eq!(r * F::from(42), r_scaled);
-
-    println!("testing output_wire and output_wire_in_exponent...");
-    let h_r = evaluator.ran();
-    let g_pow_r = evaluator.output_wire_in_exponent(&h_r).await;
-    let r = evaluator.output_wire(&h_r).await;
-    let g = <Curve as Pairing>::G1Affine::generator().clone();
-    assert_eq!(g_pow_r, g.mul(&r));
-}
-*/

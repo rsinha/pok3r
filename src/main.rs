@@ -184,7 +184,8 @@ async fn main() {
     });
     
     let addr_book = parse_addr_book_from_json(args.parties);
-    let mut mpc = Evaluator::new(&args.id, addr_book, e2n_tx, n2e_rx).await;
+    let messaging = network::MessagingSystem::new(&args.id, addr_book, e2n_tx, n2e_rx).await;
+    let mut mpc = Evaluator::new(messaging).await;
 
     //this is a hack until we figure out
     task::block_on(async {
@@ -249,7 +250,7 @@ async fn main() {
     sorted_cards.sort_unstable();
     let expected_cards: Vec<usize> = (0..DECK_SIZE).collect();
     assert_eq!(sorted_cards, expected_cards, "Decrypted cards are not a valid permutation of 0..51");
-    println!("completed.");
+    println!("\ncompleted.");
 
     netd_handle.join().unwrap();
 }

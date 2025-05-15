@@ -7,7 +7,7 @@ use libp2p::{
     tcp, yamux, PeerId, Transport,
 };
 use libp2p_quic as quic;
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::error::Error;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
@@ -160,5 +160,170 @@ pub async fn run_networking_daemon(
                 _ => {}
             }
         }
+    }
+}
+
+pub struct MessagingSystem {
+    /// local peer id
+    pub id: Pok3rPeerId,
+    /// information about all other peers
+    pub addr_book: Pok3rAddrBook,
+    /// receiver channel from the networkd
+    rx: mpsc::UnboundedReceiver<EvalNetMsg>,
+    /// sender channel towards the networkd
+    tx: mpsc::UnboundedSender<EvalNetMsg>,
+    /// stores incoming messages indexed by identifier and then by peer id
+    mailbox: HashMap<String, HashMap<String, String>>,
+}
+
+impl MessagingSystem {
+    pub async fn new(
+        id: &Pok3rPeerId,
+        addr_book: Pok3rAddrBook,
+        tx: mpsc::UnboundedSender<EvalNetMsg>,
+        mut rx: mpsc::UnboundedReceiver<EvalNetMsg>
+    ) -> Self {
+        // we expect the first message from the
+        // networkd to be a connection established;
+        // so, here we will loop till we get that
+        loop {
+            //do a blocking recv on the rx channel
+            let msg: EvalNetMsg = rx.select_next_some().await;
+            match msg {
+                EvalNetMsg::ConnectionEstablished { success } => {
+                    if success {
+                        println!("evaluator connected to the network");
+                        break;
+                    }
+                },
+                _ => continue,
+            }
+        }
+
+        MessagingSystem {
+            id: id.clone(),
+            addr_book,
+            rx,
+            tx,
+            mailbox : HashMap::new()
+        }
+    }
+
+    pub fn get_my_id(&self) -> u64 {
+        get_node_id_via_peer_id(&self.addr_book, &self.id).unwrap()
+    }
+
+    pub async fn send_to_all(
+        &mut self,
+        handles: impl AsRef<[String]>,
+        values: impl AsRef<[String]>,
+    ) {
+        assert!(handles.as_ref().len() == values.as_ref().len() && handles.as_ref().len() > 0);
+
+        let msg = if handles.as_ref().len() > 1 {
+            EvalNetMsg::PublishBatchValue {
+                sender: self.id.clone(),
+                handles: handles.as_ref().to_owned(),
+                values: values.as_ref().to_owned()
+            }
+        } else {
+            EvalNetMsg::PublishValue {
+                sender: self.id.clone(),
+                handle: handles.as_ref()[0].clone(),
+                value: values.as_ref()[0].clone()
+            }
+        };
+        let r = self.tx.send(msg).await;
+        if let Err(err) = r {
+            eprint!("evaluator error {:?}", err);
+        }
+    }
+
+    pub async fn recv_from_all(
+        &mut self,
+        identifier: &String
+    ) -> Vec<String> {
+        let mut messages = vec![];
+        let peers: Vec<Pok3rPeerId> = self.addr_book.keys().cloned().collect();
+        for peer_id in peers {
+            if self.id.eq(&peer_id) { continue; }
+
+            loop { //loop over all incoming messages till we find msg from peer
+                if self.mailbox.contains_key(identifier) {
+                    let sender_exists_for_handle = self.mailbox
+                        .get(identifier)
+                        .unwrap()
+                        .contains_key(&peer_id);
+                     //if we already have it, break out!
+                    if sender_exists_for_handle { break; }
+                }
+
+                let msg: EvalNetMsg = self.rx.select_next_some().await;
+                self.process_next_message(&msg);
+            }
+
+            // if we got here, we can assume we have the message from peer_id
+            let msg = self.mailbox
+                .get(identifier)
+                .unwrap()
+                .get(&peer_id)
+                .unwrap()
+                .clone();
+
+            messages.push(msg);
+        }
+
+        //clear the mailbox because we might want to use identifier again
+        self.mailbox.remove(identifier);
+
+        messages
+    }
+
+    //returns the handle which 
+    fn process_next_message(&mut self, msg: &EvalNetMsg) {
+        match msg {
+            EvalNetMsg::PublishValue {
+                sender,
+                handle,
+                value
+            } => {
+                self.accept_handle_and_value_from_sender(sender, handle, value);
+            },
+            EvalNetMsg::PublishBatchValue {
+                sender,
+                handles,
+                values
+            } => {
+                assert_eq!(handles.len(), values.len());
+
+                for (h,v) in handles.iter().zip(values.iter()) {
+                    self.accept_handle_and_value_from_sender(sender, h, v);
+                }
+            },
+            _ => return,
+        }
+    }
+
+    fn accept_handle_and_value_from_sender(&mut self,
+        sender: &String,
+        handle: &String,
+        value: &String
+    ) {
+        // if already exists, then ignore
+        if self.mailbox.contains_key(handle) {
+            let sender_exists_for_handle = self.mailbox
+                .get(handle)
+                .unwrap()
+                .contains_key(sender);
+            if sender_exists_for_handle { return; } //ignore duplicate msg!
+        } else {
+            //mailbox never got a message by this handle so lets make room for it
+            self.mailbox.insert(handle.clone(), HashMap::new());
+        }
+
+        self.mailbox
+            .get_mut(handle)
+            .unwrap()
+            .insert(sender.clone(), value.clone());
     }
 }
