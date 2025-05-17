@@ -2,7 +2,7 @@ use ark_poly::DenseUVPolynomial;
 use ark_poly::univariate::DenseOrSparsePolynomial;
 use ark_poly::univariate::DensePolynomial;
 use ark_std::UniformRand;
-use ark_ec::{Group, pairing::Pairing, AffineRepr};
+use ark_ec::{Group, pairing::Pairing};
 use ark_std::{Zero, One};
 use std::collections::HashMap;
 use std::ops::*;
@@ -67,27 +67,6 @@ impl Evaluator {
         handle
     }
 
-    /// returns shares of a random element in {1, ω, ..., ω^63}
-    pub async fn _ran_64(&mut self, h_a: &String) -> String {
-        let h_c =  self.compute_fresh_wire_label();
-
-        let h_a_exp_64 = self.exp(h_a).await;
-        let a_exp_64 = self.output_wire(&h_a_exp_64).await;
-    
-        if a_exp_64 == F::from(0) {
-            panic!("Highly improbable event occurred. Abort!");
-        }
-    
-        let mut l = a_exp_64;
-        for _ in 0..6 {
-            l = utils::compute_root(&l);
-        }
-
-        let share_c = self.get_wire(h_a) / l;
-        self.wire_shares.insert(h_c.clone(), share_c);
-        h_c
-    }
-
     pub async fn batch_ran_64(&mut self, len: usize) -> Vec<String> {
         let mut h_c = Vec::new();
         let h_as = (0..len)
@@ -141,32 +120,6 @@ impl Evaluator {
 
         self.wire_shares.insert(handle.clone(), share_x - share_y);
         handle
-    }
-    
-    pub async fn inv(&mut self, 
-        handle_in: &String
-    ) -> String {
-        // goal: compute inv([s])
-        // step 1: invoke ran_p to obtain [r]
-        // step 2: invoke mult to get [q] = [r . s]
-        // step 3: reconstruct q = r . s
-        // step 4: return [r] / q
-        
-        let handle_r = self.ran();
-        let handle_out = self.compute_fresh_wire_label();
-        
-        let handle_r_mult_s = self.mult(
-            handle_in, 
-            &handle_r).await;
-        //reconstruct the padded wires in the clear
-        let r_mult_s = self.output_wire(&handle_r_mult_s).await;
-
-        let q_inv = F::from(1) / r_mult_s;
-        let wire_out = q_inv * self.get_wire(&handle_r);
-
-        self.wire_shares.insert(handle_out.clone(), wire_out);
-
-        handle_out
     }
 
     pub async fn batch_inv(&mut self, 
@@ -580,19 +533,6 @@ impl Evaluator {
         outputs
     }
 
-    // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
-    // we will use G1
-    pub async fn output_wire_in_exponent(&mut self, wire_handle: &String) -> G1 {
-        let my_share = self.get_wire(wire_handle);
-        let g = <Curve as Pairing>::G1Affine::generator();
-        let my_share_exp = g.clone().mul(my_share);
-        
-        self.add_g1_elements_from_all_parties(
-            &my_share_exp, 
-            wire_handle
-        ).await
-    }
-
     /// reveals the value of g^[x] for the given wire handles, and adds them up
     pub async fn batch_output_wire_in_exponent(&mut self, wire_handles: &[String]) -> Vec<G1> {
         let mut my_share_exps = Vec::new();
@@ -690,56 +630,6 @@ impl Evaluator {
         let mut sum: G2 = value.clone();
         for v in incoming_values { sum = sum.add(v); }
         sum
-    }
-
-    pub async fn batch_add_g2_elements_from_all_parties(
-        &mut self,
-        inputs: &[G2],
-        identifiers: &[String]
-    ) -> Vec<G2> {
-        assert_eq!(inputs.len(), identifiers.len());
-
-        let len = inputs.len();
-
-        let mut outputs = Vec::new();
-
-        let values = inputs
-            .into_iter()
-            .map(|e| encode_g2_as_bs58_str(e))
-            .collect::<Vec<String>>();
-
-        if len > 256 {
-            let mut processed_len = 0;
-
-            while processed_len < len {
-                let this_iter_len = std::cmp::min(len - processed_len, 256);
-                let handles_bucket = &identifiers[processed_len..processed_len + this_iter_len].to_vec();
-                let values_bucket = &values[processed_len..processed_len + this_iter_len].to_vec();
-
-                self.messaging.send_to_all(handles_bucket, values_bucket).await;
-
-                processed_len += this_iter_len;
-            }
-        }
-        else {
-            self.messaging.send_to_all(identifiers, values).await;
-        }
-
-        for i in 0..inputs.len() {
-            let incoming_msgs = self.messaging.recv_from_all(&identifiers[i]).await;
-            let incoming_values: Vec<G2> = incoming_msgs
-                .into_iter()
-                .map(|x| decode_bs58_str_as_g2(&x))
-                .collect();
-
-            let sum = incoming_values
-                .iter()
-                .fold(inputs[i], |acc, v| acc.add(v));
-
-            outputs.push(sum);
-        }
-
-        outputs
     }
 
     // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
@@ -885,34 +775,6 @@ impl Evaluator {
         self.add_g1_elements_from_all_parties(&sum, identifier).await
     }
 
-    pub async fn batch_exp_and_reveal_g1(
-        &mut self, 
-        bases: Vec<Vec<G1>>,
-        exponent_handles: Vec<Vec<String>>,
-        identifiers: Vec<String>
-    ) -> Vec<G1> {
-        let len = bases.len();
-
-        assert_eq!(len, exponent_handles.len());
-        assert_eq!(len, identifiers.len());
-
-        let mut group_elements = vec![];
-
-        for i in 0..len {
-            let msm_input = bases[i].iter().zip(exponent_handles[i].iter());
-            let mut sum = G1::zero();
-
-            for (base, exponent_handle) in msm_input {
-                let exponentiated = base.mul(self.get_wire(exponent_handle));
-                sum = sum.add(exponentiated);
-            }
-
-            group_elements.push(sum);
-        }
-
-        self.batch_add_g1_elements_from_all_parties(&group_elements, &identifiers).await
-    }
-
     pub async fn exp_and_reveal_g2(
         &mut self, 
         bases: Vec<G2>, 
@@ -930,49 +792,6 @@ impl Evaluator {
         }
 
         self.add_g2_elements_from_all_parties(&sum, identifier).await
-    }
-
-    pub async fn batch_exp_and_reveal_g2(
-        &mut self, 
-        bases: Vec<Vec<G2>>,
-        exponent_handles: Vec<Vec<String>>,
-        identifiers: Vec<String>
-    ) -> Vec<G2> {
-        let len = bases.len();
-
-        assert_eq!(len, exponent_handles.len());
-        assert_eq!(len, identifiers.len());
-
-        let mut group_elements = vec![];
-
-        for i in 0..len {
-            let msm_input = bases[i].iter().zip(exponent_handles[i].iter());
-            let mut sum = G2::zero();
-
-            for (base, exponent_handle) in msm_input {
-                let exponentiated = base.mul(self.get_wire(exponent_handle));
-                sum = sum.add(exponentiated);
-            }
-
-            group_elements.push(sum);
-        }
-
-        self.batch_add_g2_elements_from_all_parties(&group_elements, &identifiers).await
-    }
-
-    /// returns a^64
-    pub async fn exp(&mut self, input_label: &String) -> String {
-        let mut tmp = input_label.clone();
-        for _i in 0..6 {
-            tmp = self.mult(
-                &tmp, 
-                &tmp
-            ).await;
-        }
-
-        let handle = self.compute_fresh_wire_label();
-        self.wire_shares.insert(handle.clone(), self.get_wire(&tmp));
-        handle
     }
 
     pub async fn batch_exp(&mut self, input_labels: &[String]) -> Vec<String> {
@@ -1073,64 +892,6 @@ impl Evaluator {
         ).await;
     
         (c1, c2)
-    }
-
-    pub async fn _batch_dist_ibe_encrypt(
-        &mut self, 
-        msg_share_handles: &[String], // [z1]
-        mask_share_handles: &[String], // [r]
-        pk: &G2, 
-        ids: &[BigUint]
-    ) -> (Vec<G2>, Vec<Gt>) {
-        assert_eq!(msg_share_handles.len(), mask_share_handles.len());
-
-        // Compute e_i^r
-        let e_is = ids
-            .iter()
-            .zip(mask_share_handles.iter())
-            .map(|(id, mask)| {
-                let x_f = F::from(id.clone());
-                let hash_id_pow_r = G1::generator().mul(x_f).mul(self.get_wire(&mask));
-
-                <Curve as Pairing>::pairing(hash_id_pow_r, pk)
-            })
-            .collect::<Vec<Gt>>();
-
-        let c1s = self.batch_exp_and_reveal_g2(
-            vec![vec![G2::generator()]; msg_share_handles.len()], 
-            vec![mask_share_handles.to_vec(); PERM_SIZE], 
-            msg_share_handles
-                .iter()
-                .map(|h| String::from("ibe_c1_".to_owned() + h))
-                .collect::<Vec<String>>()
-        ).await;
-
-        // Vector of 64 elements, where the i^th element is a vector [g, e_i^r]
-        let gt_with_e_is = (0..msg_share_handles.len())
-            .into_iter()
-            .map(|i| vec![Gt::generator(), e_is[i].clone()])
-            .collect::<Vec<Vec<Gt>>>();
-
-        // Vector of 64 elements, where the i^th element is a vector [msg_i, 1]
-        let one_wire_handle = self.compute_fresh_wire_label();
-        self.wire_shares.insert(one_wire_handle.clone(), F::one());
-
-        let msg_mask_interleaved = msg_share_handles
-            .iter()
-            .zip(mask_share_handles.iter())
-            .map(|(m, _)| vec![m.clone(), one_wire_handle.clone()])
-            .collect::<Vec<Vec<String>>>();
-
-        let c2s = self.batch_exp_and_reveal_gt(
-            gt_with_e_is, 
-            msg_mask_interleaved, 
-            msg_share_handles
-                .iter()
-                .map(|h| String::from("ibe_c2".to_owned() + h))
-                .collect::<Vec<String>>()
-        ).await;
-
-        (c1s, c2s)
     }
 
     /// Same as dist_batch_ibe_encrypt, but with common mask
