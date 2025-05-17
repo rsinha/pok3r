@@ -6,8 +6,6 @@ use ark_ec::{Group, pairing::Pairing};
 use ark_std::{Zero, One};
 use std::collections::HashMap;
 use std::ops::*;
-//use futures::channel::*;
-use sha2::{Sha256, Digest};
 use num_bigint::BigUint;
 use rand::{rngs::StdRng, SeedableRng};
 
@@ -42,20 +40,16 @@ impl Evaluator {
         }
     }
 
+    /// returns a unique wire label in the circuit
     fn compute_fresh_wire_label(&mut self) -> String {
         self.gate_counter += 1;
-
-        //gate_id denotes a unique identifier for this gate
-        let mut hasher_input = Vec::new();
-        hasher_input.extend_from_slice(&self.gate_counter.to_be_bytes());
-    
-        let mut hasher = Sha256::new();
-        hasher.update(&hasher_input);
-        let hash = hasher.finalize();
-    
-        bs58::encode(hash).into_string()
+        bs58::encode(&self.gate_counter.to_be_bytes()).into_string()
     }
-    
+
+    /// returns the (secret-shared) wire value associated with the given handle
+    pub fn get_wire(&self, handle: &String) -> F {
+        self.wire_shares.get(handle).unwrap().clone()
+    }
 
     /// asks the pre-processor to generate an additive sharing of a random value
     /// returns a string handle, which can be used to access the share in future
@@ -162,15 +156,13 @@ impl Evaluator {
         handle_x: &String,
         y: F
     ) -> String {
-        let handle_out = self.compute_fresh_wire_label();
-
         let x = self.get_wire(&handle_x);
-
         let clear_add_share: F = match self.messaging.get_my_id() {
             0 => {x + y}
             _ => {x}
         };
 
+        let handle_out = self.compute_fresh_wire_label();
         self.wire_shares.insert(handle_out.clone(), clear_add_share);
 
         handle_out
@@ -470,10 +462,13 @@ impl Evaluator {
     pub async fn output_wire(&mut self, wire_handle: &String) -> F {
         let my_share = self.get_wire(wire_handle);
 
-        self.messaging.send_to_all([wire_handle.clone()], [encode_f_as_bs58_str(&my_share)]).await;
+        self.messaging
+            .send_to_all([wire_handle.clone()], [encode_f_as_bs58_str(&my_share)])
+            .await;
 
-        let incoming_msgs = self.messaging.recv_from_all(wire_handle).await;
-        let incoming_values: Vec<F> = incoming_msgs
+        let incoming_values: Vec<F> = self.messaging
+            .recv_from_all(wire_handle)
+            .await
             .into_iter()
             .map(|x| decode_bs58_str_as_f(&x))
             .collect();
@@ -517,8 +512,9 @@ impl Evaluator {
         }
 
         for i in 0..len {
-            let incoming_msgs = self.messaging.recv_from_all(&wire_handles[i]).await;
-            let incoming_values: Vec<F> = incoming_msgs
+            let incoming_values: Vec<F> = self.messaging
+                .recv_from_all(&wire_handles[i])
+                .await
                 .into_iter()
                 .map(|x| decode_bs58_str_as_f(&x))
                 .collect();
@@ -554,10 +550,13 @@ impl Evaluator {
         &mut self, value: &G1, 
         identifier: &String
     ) -> G1 {
-        self.messaging.send_to_all([identifier.clone()], [encode_g1_as_bs58_str(value)]).await;
-        let incoming_msgs = self.messaging.recv_from_all(identifier).await;
+        self.messaging
+            .send_to_all([identifier.clone()], [encode_g1_as_bs58_str(value)])
+            .await;
 
-        let incoming_values: Vec<G1> = incoming_msgs
+        let incoming_values: Vec<G1> = self.messaging
+            .recv_from_all(identifier)
+            .await
             .into_iter()
             .map(|x| decode_bs58_str_as_g1(&x))
             .collect();
@@ -619,10 +618,13 @@ impl Evaluator {
         &mut self, value: &G2, 
         identifier: &String
     ) -> G2 {
-        self.messaging.send_to_all([identifier.clone()], [encode_g2_as_bs58_str(value)]).await;
-        let incoming_msgs = self.messaging.recv_from_all(identifier).await;
+        self.messaging
+            .send_to_all([identifier.clone()], [encode_g2_as_bs58_str(value)])
+            .await;
 
-        let incoming_values: Vec<G2> = incoming_msgs
+        let incoming_values: Vec<G2> = self.messaging
+            .recv_from_all(identifier)
+            .await
             .into_iter()
             .map(|x| decode_bs58_str_as_g2(&x))
             .collect();
@@ -639,9 +641,9 @@ impl Evaluator {
     ) -> Gt {
         self.messaging.send_to_all([identifier.clone()], [encode_gt_as_bs58_str(value)]).await;
 
-        let incoming_msgs = self.messaging.recv_from_all(identifier).await;
-
-        let incoming_values: Vec<Gt> = incoming_msgs
+        let incoming_values: Vec<Gt> = self.messaging
+            .recv_from_all(identifier)
+            .await
             .into_iter()
             .map(|x| decode_bs58_str_as_gt(&x))
             .collect();
@@ -685,8 +687,9 @@ impl Evaluator {
         }
 
         for i in 0..inputs.len() {
-            let incoming_msgs = self.messaging.recv_from_all(&identifiers[i]).await;
-            let incoming_values: Vec<Gt> = incoming_msgs
+            let incoming_values: Vec<Gt> = self.messaging
+                .recv_from_all(&identifiers[i])
+                .await
                 .into_iter()
                 .map(|x| decode_bs58_str_as_gt(&x))
                 .collect();
@@ -811,10 +814,6 @@ impl Evaluator {
         }
 
         output
-    }
-
-    pub fn get_wire(&self, handle: &String) -> F {
-        self.wire_shares.get(handle).unwrap().clone()
     }
 
     pub async fn eval_proof_with_share_poly(&mut self, pp: &UniversalParams<Curve>, share_poly: DensePolynomial<F>, z: F) -> G1 {
