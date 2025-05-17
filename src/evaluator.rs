@@ -18,8 +18,6 @@ use crate::network;
 use crate::utils;
 use crate::encoding::*;
 
-type KZG = crate::kzg::KZG10::<Curve, DensePolynomial<<Curve as Pairing>::ScalarField>>;
-
 
 pub struct Evaluator {
     /// local peer id
@@ -1046,7 +1044,6 @@ impl Evaluator {
         }
 
         pi_share_vec
-        // self.batch_add_g1_elements_from_all_parties(&pi_share_vec, &f_names).await
     }
 
     pub async fn dist_ibe_encrypt(
@@ -1056,8 +1053,6 @@ impl Evaluator {
         pk: &G2, 
         id: BigUint
     ) -> (G1, Gt) {
-        // let msg_share = self.output_wire_in_exponent(msg_share_handle).await;
-        // let mask_share = self.output_wire_in_exponent(mask_share_handle).await;
     
         // TODO: fix this. Need proper hash to curve
         let x_f = F::from(id);
