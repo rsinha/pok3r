@@ -495,6 +495,7 @@ impl Evaluator {
             values.push(encode_f_as_bs58_str(&self.get_wire(&wire_handles[i])));
         }
 
+        // let's try to send in batches when possible
         if len > 256 {
             let mut processed_len = 0;
 
@@ -715,10 +716,7 @@ impl Evaluator {
         
         // Compute \sum_i g_i^[x_i]
         for (base, exponent_handle) in bases.iter().zip(exponent_handles.iter()) {
-            let my_share = self.get_wire(exponent_handle);
-            let exponentiated = base.clone().mul(my_share);
-
-            sum = sum.add(exponentiated);
+            sum = sum.add(base.mul(self.get_wire(exponent_handle)));
         }
 
         self.add_gt_elements_from_all_parties(&sum, func_name).await
@@ -732,8 +730,7 @@ impl Evaluator {
     ) -> Vec<Gt> {
         let len = bases.len();
 
-        assert_eq!(len, exponent_handles.len());
-        assert_eq!(len, identifiers.len());
+        assert!(len == exponent_handles.len() && len == identifiers.len());
 
         let mut group_elements = vec![];
 
