@@ -148,7 +148,7 @@ fn parse_addr_book_from_json(num_parties: u64) -> Pok3rAddrBook {
         .collect();
 
     let mut output: Pok3rAddrBook = HashMap::new();
-    let mut counter = 0;
+    let mut counter = 1;
     for peer in &peers[0..num_parties as usize] {
         let pok3rpeer = Pok3rPeer {
             peer_id: peer.to_owned(),

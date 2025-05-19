@@ -158,7 +158,7 @@ impl Evaluator {
     ) -> String {
         let x = self.get_wire(&handle_x);
         let clear_add_share: F = match self.messaging.get_my_id() {
-            0 => {x + y}
+            1 => {x + y}
             _ => {x}
         };
 
@@ -209,7 +209,7 @@ impl Evaluator {
         
         //only one party should add the constant term
         let share_x_mul_y: F = match self.messaging.get_my_id() {
-            0 => {
+            1 => {
                 x_plus_a * y_plus_b 
                 - x_plus_a * share_b 
                 - y_plus_b * share_a 
@@ -272,7 +272,7 @@ impl Evaluator {
 
             //only one party should add the constant term
             let share_x_mul_y: F = match self.messaging.get_my_id() {
-                0 => {
+                1 => {
                     x_plus_a_reconstructed * y_plus_b_reconstructed 
                     - x_plus_a_reconstructed * bookkeeping_b[i] 
                     - y_plus_b_reconstructed * bookkeeping_a[i]  
@@ -299,7 +299,7 @@ impl Evaluator {
         let handle = self.compute_fresh_wire_label();
         
         let share: F = match self.messaging.get_my_id() {
-            0 => value,
+            1 => value,
             _ => F::from(0)
         };
 
@@ -375,7 +375,7 @@ impl Evaluator {
         let mut sum_b = F::from(0);
         let mut sum_c = F::from(0);
 
-        for i in 1..n {
+        for i in 2..=n {
             let party_i_share_a =  F::rand(&mut seeded_rng);
             let party_i_share_b =  F::rand(&mut seeded_rng);
             let party_i_share_c =  F::rand(&mut seeded_rng);
@@ -391,7 +391,7 @@ impl Evaluator {
             }
         }
 
-        if my_id == 0 {
+        if my_id == 1 {
             self.wire_shares.insert(handle_a.clone(), F::from(0) - sum_a);
             self.wire_shares.insert(handle_b.clone(), F::from(0) - sum_b);
             self.wire_shares.insert(handle_c.clone(), F::from(0) - sum_c);
@@ -427,7 +427,7 @@ impl Evaluator {
         let mut sum_c = vec![F::from(0); num_beavers];
 
         for i in 0..num_beavers {
-            for j in 1..n {
+            for j in 2..=n {
                 let party_j_share_a =  F::rand(&mut seeded_rng);
                 let party_j_share_b =  F::rand(&mut seeded_rng);
                 let party_j_share_c =  F::rand(&mut seeded_rng);
@@ -443,7 +443,7 @@ impl Evaluator {
                 }
             }
 
-            if my_id == 0 {
+            if my_id == 1 {
                 self.wire_shares.insert(handles_a[i].clone(), F::from(0) - sum_a[i]);
                 self.wire_shares.insert(handles_b[i].clone(), F::from(0) - sum_b[i]);
                 self.wire_shares.insert(handles_c[i].clone(), F::from(0) - sum_c[i]);

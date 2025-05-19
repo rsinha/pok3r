@@ -23,6 +23,9 @@ struct MyBehaviour {
 }
 
 fn generate_ed25519(secret_key_seed: u8) -> identity::Keypair {
+    // for now we are using a single byte as the seed
+    // this is not secure obviously, 
+    // but we are not using it to make life easy
     let mut bytes = [0u8; 32];
     bytes[0] = secret_key_seed;
 
