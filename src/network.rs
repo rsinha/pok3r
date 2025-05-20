@@ -2,8 +2,7 @@ use futures::{future::Either, prelude::*, select, channel::*};
 use libp2p::{
     core::{muxing::StreamMuxerBox, transport::OrTransport, upgrade},
     gossipsub, identity, mdns, noise,
-    swarm::NetworkBehaviour,
-    swarm::{SwarmBuilder, SwarmEvent},
+    swarm::{NetworkBehaviour, SwarmBuilder, SwarmEvent},
     tcp, yamux, PeerId, Transport,
 };
 use libp2p_quic as quic;
@@ -245,11 +244,11 @@ impl MessagingSystem {
     pub async fn recv_from_all(
         &mut self,
         identifier: &String
-    ) -> Vec<String> {
-        let mut messages = vec![];
+    ) -> HashMap<u64, String> {
+        let mut messages: HashMap<u64, String> = HashMap::new();
         let peers: Vec<Pok3rPeerId> = self.addr_book.keys().cloned().collect();
         for peer_id in peers {
-            if self.id.eq(&peer_id) { continue; }
+            if self.id.eq(&peer_id) { continue; } // ignore self
 
             loop { //loop over all incoming messages till we find msg from peer
                 if self.mailbox.contains_key(identifier) {
@@ -272,8 +271,9 @@ impl MessagingSystem {
                 .get(&peer_id)
                 .unwrap()
                 .clone();
+            let peer_id_as_u64 = get_node_id_via_peer_id(&self.addr_book, &peer_id).unwrap();
 
-            messages.push(msg);
+            messages.insert(peer_id_as_u64, msg);
         }
 
         //clear the mailbox because we might want to use identifier again

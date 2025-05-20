@@ -9,12 +9,12 @@ use std::ops::*;
 use num_bigint::BigUint;
 use rand::{rngs::StdRng, SeedableRng};
 
-use crate::address_book::*;
 use crate::common::*;
 use crate::kzg::*;
 use crate::network;
 use crate::utils;
 use crate::encoding::*;
+use crate::utils::*;
 
 
 pub struct Evaluator {
@@ -363,7 +363,7 @@ impl Evaluator {
         self.beaver_counter += 1;
 
         let n: usize = self.messaging.addr_book.len();
-        let my_id = get_node_id_via_peer_id(&self.messaging.addr_book, &self.messaging.id).unwrap();
+        let my_id = self.messaging.get_my_id();
 
         let handle_a = self.compute_fresh_wire_label();
         let handle_b = self.compute_fresh_wire_label();
@@ -466,17 +466,15 @@ impl Evaluator {
             .send_to_all([wire_handle.clone()], [encode_f_as_bs58_str(&my_share)])
             .await;
 
-        let incoming_values: Vec<F> = self.messaging
+        let mut incoming_values: HashMap<u64, F> = self.messaging
             .recv_from_all(wire_handle)
             .await
             .into_iter()
-            .map(|x| decode_bs58_str_as_f(&x))
+            .map(|(x,y)| (x, decode_bs58_str_as_f(&y)))
             .collect();
+        incoming_values.insert(self.messaging.get_my_id(), my_share);
 
-        let sum = incoming_values
-            .iter()
-            .fold(my_share, |acc, v| acc + v);
-        sum
+        reconstruct_scalar(&incoming_values)
     }
 
     /*
@@ -513,18 +511,15 @@ impl Evaluator {
         }
 
         for i in 0..len {
-            let incoming_values: Vec<F> = self.messaging
+            let mut incoming_values: HashMap<u64,F> = self.messaging
                 .recv_from_all(&wire_handles[i])
                 .await
                 .into_iter()
-                .map(|x| decode_bs58_str_as_f(&x))
+                .map(|(x,y)| (x, decode_bs58_str_as_f(&y)))
                 .collect();
+            incoming_values.insert(self.messaging.get_my_id(), self.get_wire(&wire_handles[i]));
 
-            let sum = incoming_values
-                .iter()
-                .fold(self.get_wire(&wire_handles[i]), |acc, v| acc + v);
-
-            outputs.push(sum);
+            outputs.push(reconstruct_scalar(&incoming_values));
         }
 
         outputs
@@ -548,23 +543,23 @@ impl Evaluator {
 
     // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
     pub async fn add_g1_elements_from_all_parties(
-        &mut self, value: &G1, 
+        &mut self,
+        value: &G1, 
         identifier: &String
     ) -> G1 {
         self.messaging
             .send_to_all([identifier.clone()], [encode_g1_as_bs58_str(value)])
             .await;
 
-        let incoming_values: Vec<G1> = self.messaging
+        let mut incoming_values: HashMap<u64, G1> = self.messaging
             .recv_from_all(identifier)
             .await
             .into_iter()
-            .map(|x| decode_bs58_str_as_g1(&x))
+            .map(|(x,y)| (x, decode_bs58_str_as_g1(&y)))
             .collect();
+        incoming_values.insert(self.messaging.get_my_id(), value.clone());
 
-        let mut sum: G1 = value.clone();
-        for v in incoming_values { sum = sum.add(v); }
-        sum
+        reconstruct_g1(&incoming_values)
     }
 
     pub async fn batch_add_g1_elements_from_all_parties(
@@ -600,58 +595,55 @@ impl Evaluator {
 
         for i in 0..inputs.len() {
             let incoming_msgs = self.messaging.recv_from_all(&identifiers[i]).await;
-            let incoming_values: Vec<G1> = incoming_msgs
+            let mut shares: HashMap<u64, G1> = incoming_msgs
                 .into_iter()
-                .map(|x| decode_bs58_str_as_g1(&x))
+                .map(|(x, y)| (x, decode_bs58_str_as_g1(&y)))
                 .collect();
+            shares.insert(self.messaging.get_my_id(), inputs[i]);
 
-            let sum = incoming_values
-                .iter()
-                .fold(inputs[i], |acc, v| acc.add(v));
-
-            outputs.push(sum);
+            outputs.push(reconstruct_g1(&shares));
         }
 
         outputs
     }
 
     pub async fn add_g2_elements_from_all_parties(
-        &mut self, value: &G2, 
+        &mut self,
+        value: &G2, 
         identifier: &String
     ) -> G2 {
         self.messaging
             .send_to_all([identifier.clone()], [encode_g2_as_bs58_str(value)])
             .await;
 
-        let incoming_values: Vec<G2> = self.messaging
+        let mut incoming_values: HashMap<u64, G2> = self.messaging
             .recv_from_all(identifier)
             .await
             .into_iter()
-            .map(|x| decode_bs58_str_as_g2(&x))
+            .map(|(x, y)| (x, decode_bs58_str_as_g2(&y)))
             .collect();
+        incoming_values.insert(self.messaging.get_my_id(), value.clone());
 
-        let mut sum: G2 = value.clone();
-        for v in incoming_values { sum = sum.add(v); }
-        sum
+        utils::reconstruct_g2(&incoming_values)
     }
 
     // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
     pub async fn add_gt_elements_from_all_parties(
-        &mut self, value: &Gt, 
+        &mut self,
+        value: &Gt, 
         identifier: &String
     ) -> Gt {
         self.messaging.send_to_all([identifier.clone()], [encode_gt_as_bs58_str(value)]).await;
 
-        let incoming_values: Vec<Gt> = self.messaging
+        let mut incoming_values: HashMap<u64, Gt> = self.messaging
             .recv_from_all(identifier)
             .await
             .into_iter()
-            .map(|x| decode_bs58_str_as_gt(&x))
+            .map(|(x,y)| (x, decode_bs58_str_as_gt(&y)))
             .collect();
+        incoming_values.insert(self.messaging.get_my_id(), value.clone());
 
-        let mut sum: Gt = value.clone();
-        for v in incoming_values { sum = sum.add(v); }
-        sum
+        utils::reconstruct_gt(&incoming_values)
     }
 
     pub async fn batch_add_gt_elements_from_all_parties(
@@ -688,18 +680,15 @@ impl Evaluator {
         }
 
         for i in 0..inputs.len() {
-            let incoming_values: Vec<Gt> = self.messaging
+            let mut incoming_values: HashMap<u64, Gt> = self.messaging
                 .recv_from_all(&identifiers[i])
                 .await
                 .into_iter()
-                .map(|x| decode_bs58_str_as_gt(&x))
+                .map(|(x, y)| (x, decode_bs58_str_as_gt(&y)))
                 .collect();
+            incoming_values.insert(self.messaging.get_my_id(), inputs[i]);
 
-            let sum = incoming_values
-                .iter()
-                .fold(inputs[i], |acc, v| acc.add(v));
-
-            outputs.push(sum);
+            outputs.push(reconstruct_gt(&incoming_values));
         }
 
         outputs

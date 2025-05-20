@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+use std::collections::HashMap;
+
 use ark_bls12_377::{G1Projective as G1, G2Projective as G2};
 use ark_crypto_primitives::crh::sha256::Sha256;
 use rand::{rngs::StdRng, SeedableRng};
@@ -124,6 +126,22 @@ pub fn poly_domain_div_ω(f: &DensePolynomial<F>, ω: &F) -> DensePolynomial<F> 
         new_poly.coeffs[i] = new_poly.coeffs[i] / ω_pow_i;
     }
     new_poly
+}
+
+pub fn reconstruct_scalar(shares: &HashMap<u64, F>) -> F {
+    shares.values().fold(F::from(0), |acc, share| acc + share)
+}
+
+pub fn reconstruct_g1(shares: &HashMap<u64, G1>) -> G1 {
+    shares.values().fold(G1::zero(), |acc, share| acc + share)
+}
+
+pub fn reconstruct_g2(shares: &HashMap<u64, G2>) -> G2 {
+    shares.values().fold(G2::zero(), |acc, share| acc + share)
+}
+
+pub fn reconstruct_gt(shares: &HashMap<u64, Gt>) -> Gt {
+    shares.values().fold(Gt::zero(), |acc, share| acc + share)
 }
 
 #[cfg(test)]
