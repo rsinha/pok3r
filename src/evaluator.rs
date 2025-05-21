@@ -16,10 +16,11 @@ use crate::utils;
 use crate::encoding::*;
 use crate::utils::*;
 
-
 pub struct Evaluator {
     /// local peer id
     messaging: network::MessagingSystem,
+    /// pre-processed beaver triples
+    beaver_triples: Vec<(F, F, F)>, // (a, b, c) share
     /// stores the share associated with each wire
     wire_shares: HashMap<String, F>,
     /// keep track of gates
@@ -32,12 +33,15 @@ impl Evaluator {
     pub async fn new(
         messaging: network::MessagingSystem
     ) -> Self {
-        Evaluator {
+        let mut evaluator = Evaluator {
             wire_shares: HashMap::new(),
+            beaver_triples: Vec::new(),
             messaging,
             gate_counter: 0,
             beaver_counter: 0
-        }
+        };
+        evaluator.preprocess_triples(NUM_BEAVER_TRIPLES).await;
+        evaluator
     }
 
     /// returns a unique wire label in the circuit
@@ -929,6 +933,45 @@ impl Evaluator {
         ).await;
 
         (c1, c2s)
+    }
+
+    async fn preprocess_triples(&mut self, num_beavers: usize) {
+        let n: usize = self.messaging.addr_book.len();
+        let my_id = self.messaging.get_my_id();
+
+        let mut seeded_rng = StdRng::from_seed([42u8; 32]);
+
+        let mut sum_a = vec![F::from(0); num_beavers];
+        let mut sum_b = vec![F::from(0); num_beavers];
+        let mut sum_c = vec![F::from(0); num_beavers];
+
+        for i in 0..num_beavers {
+            for j in 1..n {
+                let party_j_share_a =  F::rand(&mut seeded_rng);
+                let party_j_share_b =  F::rand(&mut seeded_rng);
+                let party_j_share_c =  F::rand(&mut seeded_rng);
+
+                sum_a[i] += party_j_share_a;
+                sum_b[i] += party_j_share_b;
+                sum_c[i] += party_j_share_c;
+
+                if j == (my_id as usize) {
+                    self.beaver_triples.push((
+                        party_j_share_a,
+                        party_j_share_b,
+                        party_j_share_c
+                    ));
+                }
+            }
+
+            if n == (my_id as usize) {
+                self.beaver_triples.push((
+                    F::from(0) - sum_a[i],
+                    F::from(0) - sum_b[i],
+                    F::from(0) - sum_c[i]
+                ));
+            }
+        }
     }
 
 }

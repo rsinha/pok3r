@@ -5,7 +5,8 @@ use ark_poly::univariate::DensePolynomial;
 pub const PERM_SIZE: usize = 64;
 pub const DECK_SIZE: usize = 52;
 pub const LOG_PERM_SIZE: usize = 6;
-pub const NUM_SAMPLES: usize = 400;
+pub const NUM_SAMPLES: usize = 420;
+pub const NUM_BEAVER_TRIPLES: usize = 3466;
 
 pub type Curve = ark_bls12_377::Bls12_377;
 pub type F = ark_bls12_377::Fr;
