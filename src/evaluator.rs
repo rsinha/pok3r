@@ -363,56 +363,22 @@ impl Evaluator {
     }
 
     pub async fn beaver(&mut self) -> (String, String, String) {
-        // Update beaver counter
-        self.beaver_counter += 1;
-
-        let n: usize = self.messaging.addr_book.len();
-        let my_id = self.messaging.get_my_id();
-
         let handle_a = self.compute_fresh_wire_label();
         let handle_b = self.compute_fresh_wire_label();
         let handle_c = self.compute_fresh_wire_label();
 
-        let mut seeded_rng = StdRng::from_seed([42u8; 32]);
+        self.wire_shares.insert(handle_a.clone(), self.beaver_triples[self.beaver_counter as usize].0);
+        self.wire_shares.insert(handle_b.clone(), self.beaver_triples[self.beaver_counter as usize].1);
+        self.wire_shares.insert(handle_c.clone(), self.beaver_triples[self.beaver_counter as usize].2);
 
-        let mut sum_a = F::from(0);
-        let mut sum_b = F::from(0);
-        let mut sum_c = F::from(0);
-
-        for i in 2..=n {
-            let party_i_share_a =  F::rand(&mut seeded_rng);
-            let party_i_share_b =  F::rand(&mut seeded_rng);
-            let party_i_share_c =  F::rand(&mut seeded_rng);
-
-            sum_a += party_i_share_a;
-            sum_b += party_i_share_b;
-            sum_c += party_i_share_c;
-
-            if i == (my_id as usize) {
-                self.wire_shares.insert(handle_a.clone(), party_i_share_a);
-                self.wire_shares.insert(handle_b.clone(), party_i_share_b);
-                self.wire_shares.insert(handle_c.clone(), party_i_share_c);
-            }
-        }
-
-        if my_id == 1 {
-            self.wire_shares.insert(handle_a.clone(), F::from(0) - sum_a);
-            self.wire_shares.insert(handle_b.clone(), F::from(0) - sum_b);
-            self.wire_shares.insert(handle_c.clone(), F::from(0) - sum_c);
-        }
+        // Update beaver counter
+        self.beaver_counter += 1;
 
         (handle_a, handle_b, handle_c)
     }
 
     pub fn batch_beaver(&mut self, num_beavers: usize) -> Vec<(String, String, String)> {
-        // Update beaver counter
-        self.beaver_counter += num_beavers as u64;
-
-        let n: usize = self.messaging.addr_book.len();
-        let my_id = self.messaging.get_my_id();
-
-        let mut seeded_rng = StdRng::from_seed([42u8; 32]);
-
+        let mut output = Vec::new();
         let handles_a: Vec<String> = (0..num_beavers)
             .into_iter()
             .map(|_| self.compute_fresh_wire_label())
@@ -426,38 +392,16 @@ impl Evaluator {
             .map(|_| self.compute_fresh_wire_label())
             .collect();
 
-        let mut sum_a = vec![F::from(0); num_beavers];
-        let mut sum_b = vec![F::from(0); num_beavers];
-        let mut sum_c = vec![F::from(0); num_beavers];
-
         for i in 0..num_beavers {
-            for j in 2..=n {
-                let party_j_share_a =  F::rand(&mut seeded_rng);
-                let party_j_share_b =  F::rand(&mut seeded_rng);
-                let party_j_share_c =  F::rand(&mut seeded_rng);
+            self.wire_shares.insert(handles_a[i].clone(), self.beaver_triples[self.beaver_counter as usize + i].0);
+            self.wire_shares.insert(handles_b[i].clone(), self.beaver_triples[self.beaver_counter as usize + i].1);
+            self.wire_shares.insert(handles_c[i].clone(), self.beaver_triples[self.beaver_counter as usize + i].2);
 
-                sum_a[i] += party_j_share_a;
-                sum_b[i] += party_j_share_b;
-                sum_c[i] += party_j_share_c;
-
-                if j == (my_id as usize) {
-                    self.wire_shares.insert(handles_a[i].clone(), party_j_share_a);
-                    self.wire_shares.insert(handles_b[i].clone(), party_j_share_b);
-                    self.wire_shares.insert(handles_c[i].clone(), party_j_share_c);
-                }
-            }
-
-            if my_id == 1 {
-                self.wire_shares.insert(handles_a[i].clone(), F::from(0) - sum_a[i]);
-                self.wire_shares.insert(handles_b[i].clone(), F::from(0) - sum_b[i]);
-                self.wire_shares.insert(handles_c[i].clone(), F::from(0) - sum_c[i]);
-            }
-        }
-
-        let mut output = Vec::new();
-        for i in 0..num_beavers {
             output.push((handles_a[i].clone(), handles_b[i].clone(), handles_c[i].clone()));
         }
+
+        // Update beaver counter
+        self.beaver_counter += num_beavers as u64;
 
         output
     }
