@@ -379,25 +379,17 @@ impl Evaluator {
 
     pub fn batch_beaver(&mut self, num_beavers: usize) -> Vec<(String, String, String)> {
         let mut output = Vec::new();
-        let handles_a: Vec<String> = (0..num_beavers)
-            .into_iter()
-            .map(|_| self.compute_fresh_wire_label())
-            .collect();
-        let handles_b: Vec<String> = (0..num_beavers)
-            .into_iter()
-            .map(|_| self.compute_fresh_wire_label())
-            .collect();
-        let handles_c: Vec<String> = (0..num_beavers)
-            .into_iter()
-            .map(|_| self.compute_fresh_wire_label())
-            .collect();
 
         for i in 0..num_beavers {
-            self.wire_shares.insert(handles_a[i].clone(), self.beaver_triples[self.beaver_counter as usize + i].0);
-            self.wire_shares.insert(handles_b[i].clone(), self.beaver_triples[self.beaver_counter as usize + i].1);
-            self.wire_shares.insert(handles_c[i].clone(), self.beaver_triples[self.beaver_counter as usize + i].2);
+            let handle_a = self.compute_fresh_wire_label();
+            let handle_b = self.compute_fresh_wire_label();
+            let handle_c = self.compute_fresh_wire_label();
 
-            output.push((handles_a[i].clone(), handles_b[i].clone(), handles_c[i].clone()));
+            self.wire_shares.insert(handle_a.clone(), self.beaver_triples[self.beaver_counter as usize + i].0);
+            self.wire_shares.insert(handle_b.clone(), self.beaver_triples[self.beaver_counter as usize + i].1);
+            self.wire_shares.insert(handle_c.clone(), self.beaver_triples[self.beaver_counter as usize + i].2);
+
+            output.push((handle_a, handle_b, handle_c));
         }
 
         // Update beaver counter
