@@ -21,12 +21,16 @@ pub struct Evaluator {
     messaging: network::MessagingSystem,
     /// pre-processed beaver triples
     beaver_triples: Vec<(F, F, F)>, // (a, b, c) share
+    /// pre-processed random sharings
+    rand_sharings: Vec<F>,
     /// stores the share associated with each wire
     wire_shares: HashMap<String, F>,
     /// keep track of gates
     gate_counter: u64,
     /// keep track of the number of beaver triples consumed
-    beaver_counter: u64
+    beaver_counter: u64,
+    /// keep track of the number of rand sharings consumed
+    rand_counter: u64,
 }
 
 impl Evaluator {
@@ -36,11 +40,14 @@ impl Evaluator {
         let mut evaluator = Evaluator {
             wire_shares: HashMap::new(),
             beaver_triples: Vec::new(),
+            rand_sharings: Vec::new(),
             messaging,
             gate_counter: 0,
-            beaver_counter: 0
+            beaver_counter: 0,
+            rand_counter: 0,
         };
         evaluator.preprocess_triples(NUM_BEAVER_TRIPLES).await;
+        evaluator.preprocess_rand_sharings(NUM_RAND_SHARINGS).await;
         evaluator
     }
 
@@ -58,10 +65,11 @@ impl Evaluator {
     /// asks the pre-processor to generate an additive sharing of a random value
     /// returns a string handle, which can be used to access the share in future
     pub fn ran(&mut self) -> String {
-        let r = F::rand(&mut rand::thread_rng());
-
         let handle = self.compute_fresh_wire_label();
-        self.wire_shares.insert(handle.clone(), r);
+        self.wire_shares.insert(handle.clone(), self.rand_sharings[self.rand_counter as usize]);
+
+        self.rand_counter += 1;
+
         handle
     }
 
@@ -869,6 +877,13 @@ impl Evaluator {
         ).await;
 
         (c1, c2s)
+    }
+
+    async fn preprocess_rand_sharings(&mut self, num_sharings: usize) {
+        for _i in 0..num_sharings {
+            let r = F::rand(&mut rand::thread_rng());
+            self.rand_sharings.push(r);
+        }
     }
 
     async fn preprocess_triples(&mut self, num_beavers: usize) {
