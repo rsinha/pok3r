@@ -878,9 +878,15 @@ impl Evaluator {
     }
 
     async fn preprocess_rand_sharings(&mut self, num_sharings: usize) {
+        let n: u64 = self.messaging.addr_book.len() as u64;
+        let index = self.messaging.get_my_id() - 1;
+
+        let mut rng = rand_chacha::ChaCha8Rng::from_seed([0u8; 32]);
+
         for _i in 0..num_sharings {
-            let r = F::rand(&mut rand::thread_rng());
-            self.rand_sharings.push(r);
+            let secret = F::rand(&mut rng);
+            let shares = crate::shamir::share(&secret, (n, n), &mut rng);
+            self.rand_sharings.push(shares[index as usize].clone().1);
         }
     }
 
