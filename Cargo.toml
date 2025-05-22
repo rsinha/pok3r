@@ -23,7 +23,8 @@ ark-serialize = { version = "^0.4.0", default-features = true }
 ark-crypto-primitives = { version = "0.4.0", default-features = false, features = [ "crh" ] }
 num-bigint = { version = "0.4.0", default-features = false }
 
-rand = "0.8"
+rand = "0.8.5"
+rand_chacha = "0.3.1"
 paste = { version = "1.0" }
 crossbeam = { version = "0.8.2" }
 tracing = { version = "0.1", default-features = false, features = [ "attributes" ] }

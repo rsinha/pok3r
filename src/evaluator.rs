@@ -1,9 +1,7 @@
 use ark_poly::DenseUVPolynomial;
-use ark_poly::univariate::DenseOrSparsePolynomial;
-use ark_poly::univariate::DensePolynomial;
-use ark_std::UniformRand;
+use ark_poly::univariate::{DensePolynomial, DenseOrSparsePolynomial};
 use ark_ec::{Group, pairing::Pairing};
-use ark_std::{Zero, One};
+use ark_std::{UniformRand, Zero, One};
 use std::collections::HashMap;
 use std::ops::*;
 use num_bigint::BigUint;

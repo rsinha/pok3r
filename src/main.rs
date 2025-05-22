@@ -13,6 +13,7 @@ mod utils;
 mod kzg;
 mod encoding;
 mod shuffler;
+mod shamir;
 
 use address_book::*;
 use evaluator::*;
