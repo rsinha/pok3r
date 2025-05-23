@@ -2,6 +2,7 @@ use ark_poly::DenseUVPolynomial;
 use ark_poly::univariate::{DensePolynomial, DenseOrSparsePolynomial};
 use ark_ec::{Group, pairing::Pairing};
 use ark_std::{UniformRand, Zero, One};
+use rand::thread_rng;
 use std::collections::HashMap;
 use std::ops::*;
 use num_bigint::BigUint;
@@ -11,6 +12,7 @@ use crate::common::*;
 use crate::kzg::*;
 use crate::network;
 use crate::utils;
+use crate::shamir;
 use crate::encoding::*;
 use crate::utils::*;
 
@@ -879,14 +881,33 @@ impl Evaluator {
 
     async fn preprocess_rand_sharings(&mut self, num_sharings: usize) {
         let n: u64 = self.messaging.addr_book.len() as u64;
-        let index = self.messaging.get_my_id() - 1;
+        let index = (self.messaging.get_my_id() - 1) as usize;
 
-        let mut rng = rand_chacha::ChaCha8Rng::from_seed([0u8; 32]);
+        let mut rng = rand_chacha::ChaCha8Rng::from_seed([1u8; 32]);
 
         for _i in 0..num_sharings {
             let secret = F::rand(&mut rng);
             let shares = crate::shamir::share(&secret, (n, n), &mut rng);
-            self.rand_sharings.push(shares[index as usize].clone().1);
+            self.rand_sharings.push(shares[index].clone().1);
+        }
+    }
+
+    async fn _preprocess_triples(&mut self, num_beavers: usize) {
+        let n: u64 = self.messaging.addr_book.len() as u64;
+        let index = (self.messaging.get_my_id() - 1) as usize;
+
+        let mut rng = rand_chacha::ChaCha8Rng::from_seed([1u8; 32]);
+
+        for _i in 0..num_beavers {
+            let a = F::rand(&mut rng);
+            let b = F::rand(&mut rng);
+            let c = a * b;
+
+            let s_a = shamir::share(&a, (n, n), &mut rng)[index].1;
+            let s_b = shamir::share(&b, (n, n), &mut rng)[index].1;
+            let s_c = shamir::share(&c, (n, n), &mut rng)[index].1;
+
+            self.beaver_triples.push((s_a, s_b, s_c));
         }
     }
 
@@ -895,6 +916,9 @@ impl Evaluator {
         let my_id = self.messaging.get_my_id();
 
         let mut seeded_rng = StdRng::from_seed([42u8; 32]);
+
+        let a = F::rand(&mut thread_rng());
+        let b = F::rand(&mut thread_rng());
 
         let mut sum_a = vec![F::from(0); num_beavers];
         let mut sum_b = vec![F::from(0); num_beavers];
@@ -921,9 +945,9 @@ impl Evaluator {
 
             if n == (my_id as usize) {
                 self.beaver_triples.push((
-                    F::from(0) - sum_a[i],
-                    F::from(0) - sum_b[i],
-                    F::from(0) - sum_c[i]
+                    a - sum_a[i],
+                    b - sum_b[i],
+                    a*b - sum_c[i]
                 ));
             }
         }
