@@ -14,7 +14,6 @@ use crate::network;
 use crate::utils;
 use crate::shamir;
 use crate::encoding::*;
-use crate::utils::*;
 
 pub struct Evaluator {
     /// local peer id
@@ -572,7 +571,7 @@ impl Evaluator {
             .collect();
         incoming_values.insert(self.messaging.get_my_id(), value.clone());
 
-        utils::reconstruct_g2(&incoming_values)
+        reconstruct_g2(&incoming_values)
     }
 
     // //on input wire [x], this outputs g^[x], and reconstructs and outputs g^x
@@ -591,7 +590,7 @@ impl Evaluator {
             .collect();
         incoming_values.insert(self.messaging.get_my_id(), value.clone());
 
-        utils::reconstruct_gt(&incoming_values)
+        reconstruct_gt(&incoming_values)
     }
 
     pub async fn batch_add_gt_elements_from_all_parties(
@@ -953,4 +952,20 @@ impl Evaluator {
         }
     }
 
+}
+
+fn reconstruct_scalar(shares: &HashMap<u64, F>) -> F {
+    shares.values().fold(F::from(0), |acc, share| acc + share)
+}
+
+fn reconstruct_g1(shares: &HashMap<u64, G1>) -> G1 {
+    shares.values().fold(G1::zero(), |acc, share| acc + share)
+}
+
+fn reconstruct_g2(shares: &HashMap<u64, G2>) -> G2 {
+    shares.values().fold(G2::zero(), |acc, share| acc + share)
+}
+
+fn reconstruct_gt(shares: &HashMap<u64, Gt>) -> Gt {
+    shares.values().fold(Gt::zero(), |acc, share| acc + share)
 }
