@@ -917,14 +917,14 @@ impl Evaluator {
 
         let mut seeded_rng = StdRng::from_seed([42u8; 32]);
 
-        let a = F::rand(&mut thread_rng());
-        let b = F::rand(&mut thread_rng());
-
         let mut sum_a = vec![F::from(0); num_beavers];
         let mut sum_b = vec![F::from(0); num_beavers];
         let mut sum_c = vec![F::from(0); num_beavers];
 
         for i in 0..num_beavers {
+            let a = F::rand(&mut thread_rng());
+            let b = F::rand(&mut thread_rng());
+
             for j in 1..n {
                 let party_j_share_a =  F::rand(&mut seeded_rng);
                 let party_j_share_b =  F::rand(&mut seeded_rng);

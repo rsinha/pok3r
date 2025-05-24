@@ -35,7 +35,7 @@ pub fn share<R: Rng>(
  * shares contains the polynomial points { (x,y) }, where x is
  * some field element, and y is the polynomial evaluation at x.
  */
-pub fn recover(shares: Vec<(F,F)>) -> F {
+pub fn recover(shares: &Vec<(F,F)>) -> F {
     let xs: Vec<F> = shares.iter().map(|(x, _)| *x).collect();
     let ys: Vec<F> = shares.iter().map(|(_, y)| *y).collect();
 
@@ -93,7 +93,7 @@ mod tests {
         let secret = F::rand(&mut rng);
 
         let shares = share(&secret, (3, 5), &mut rng);
-        let recovered = recover(shares);
+        let recovered = recover(&shares);
 
         assert_eq!(secret, recovered);
     }
